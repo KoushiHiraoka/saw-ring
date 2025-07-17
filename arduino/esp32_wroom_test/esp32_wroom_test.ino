@@ -16,7 +16,7 @@ const int I2S_WS_PIN      = I2S_PIN_NO_CHANGE; // PDM では WS は使わない
 const int I2S_DATA_IN_PIN = 25;  // レベルシフタ経由で VPU の DATA
 
 void setup() {
-  Serial.begin(921600);
+  Serial.begin(115200);
   delay(500);
 
   // 1) I2S ドライバのインストール
