@@ -43,24 +43,31 @@ if __name__ == '__main__':
     # シグナルハンドラを設定
     signal.signal(signal.SIGINT, signal_handler)
 
-    app = pg.mkQApp("リアルタイム周波数解析")
+    app = pg.mkQApp("リアルタイムFFT")
     win = pg.GraphicsLayoutWidget(show=True, title="FFT Plot")
     win.resize(800, 400)
-    win.setWindowTitle('リアルタイム周波数解析')
+    win.setWindowTitle('リアルタイムFFT')
     pg.setConfigOptions(antialias=True)
 
     plot = win.addPlot(title="周波数スペクトル")
     plot.setLabel('bottom', '周波数 (Hz)')
     plot.setLabel('left', '振幅')
-    plot.setLogMode(x=False, y=True)
+    # plot.setLogMode(x=False, y=True)
     plot.setYRange(0, 10)
     curve = plot.plot(pen='y')
 
-    ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
 
-    # QTimerを使用して非同期的にデータを処理
-    timer = QtCore.QTimer()
-    timer.timeout.connect(lambda: analyze_signal(ser, curve, unpack_format, num_samples, SAMPLE_RATE))
-    timer.start(1)  # 50msごとに更新
+        # QTimerを使用して非同期的にデータを処理
+        timer = QtCore.QTimer()
+        timer.timeout.connect(lambda: analyze_signal(ser, curve, unpack_format, num_samples, SAMPLE_RATE))
+        timer.start(1)  # 1msごとに更新
 
-    QtWidgets.QApplication.instance().exec()
+        QtWidgets.QApplication.instance().exec()
+    except KeyboardInterrupt:
+        print("\nExiting program...")
+    finally:
+        if ser.is_open:
+            ser.close()
+            print("Serial port closed.")
