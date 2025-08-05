@@ -52,7 +52,7 @@ if __name__ == '__main__':
     plot = win.addPlot(title="周波数スペクトル")
     plot.setLabel('bottom', '周波数 (Hz)')
     plot.setLabel('left', '振幅')
-    # plot.setLogMode(x=False, y=True)
+    plot.setLogMode(x=False, y=True)
     plot.setYRange(0, 10)
     curve = plot.plot(pen='y')
 
