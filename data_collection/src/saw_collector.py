@@ -59,6 +59,15 @@ class AudioDataCollector:
         return dx, dy
 
 
+    def centering_window(self, width, height):
+        # ウィンドウを画面の中央に配置
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        dx = screen_width // 2 - width // 2
+        dy = screen_height // 2 - height // 2
+        
+        return dx, dy
+
     def start_collection(self):
         if not self.is_collecting_active:
             # オーディオストリームを開始
