@@ -15,7 +15,10 @@ class AudioDataCollector:
     def __init__(self, root):
         self.root = root
         self.root.title("音声データ収集")
-        self.root.geometry("500x300")
+        # ウィンドウサイズの設定
+        width, height = 1000, 600
+        dx, dy = self.centering_window(width, height)
+        self.root.geometry(f"{width}x{height}+{dx}+{dy}")
 
         # --- 状態管理用の変数 ---
         self.is_collecting_active = False # 「収集スタート」が押されたか
@@ -45,6 +48,15 @@ class AudioDataCollector:
         self.p = pyaudio.PyAudio()
         self.stream = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app) # ウィンドウのxボタンで終了
+
+    def centering_window(self, width, height):
+        # ウィンドウを画面の中央に配置
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        dx = screen_width // 2 - width // 2
+        dy = screen_height // 2 - height // 2
+        
+        return dx, dy
 
     def start_collection(self):
         if not self.is_collecting_active:
