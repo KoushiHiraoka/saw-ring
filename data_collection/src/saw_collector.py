@@ -14,7 +14,7 @@ CHUNK = 1024             # 一度に読み込むデータサイズ
 class AudioDataCollector:
     def __init__(self, root):
         self.root = root
-        self.root.title("音声データ収集")
+        self.root.title("データ収集アプリ")
         # ウィンドウサイズの設定
         width, height = 1000, 600
         dx, dy = self.centering_window(width, height)
@@ -28,16 +28,16 @@ class AudioDataCollector:
 
         # --- GUIウィジェットの作成 ---
         # ラベル入力
-        tk.Label(root, text="ジェスチャーのラベル:", font=("Helvetica", 12)).pack(pady=(10,0))
-        self.label_entry = tk.Entry(root, font=("Helvetica", 12), width=30)
-        self.label_entry.pack(pady=5)
-        self.label_entry.insert(0, "default_gesture")
+        tk.Label(root, text="SAWデータラベル", font=("Helvetica", 18)).pack(pady=(100,0))
+        self.label_entry = tk.Entry(root, font=("Helvetica", 18), width=30)
+        self.label_entry.pack(pady=20)
+        self.label_entry.insert(0, "")
 
         # ボタン
-        self.start_button = tk.Button(root, text="収集スタート", font=("Helvetica", 12), command=self.start_collection)
-        self.start_button.pack(pady=10)
+        self.start_button = tk.Button(root, text="収集スタート", font=("Helvetica", 14), command=self.start_collection)
+        self.start_button.pack(pady=20)
 
-        self.quit_button = tk.Button(root, text="終了", font=("Helvetica", 12), command=self.quit_app)
+        self.quit_button = tk.Button(root, text="終了", font=("Helvetica", 14), command=self.quit_app)
         self.quit_button.pack(pady=5)
         
         # ステータス表示
