@@ -153,7 +153,10 @@ class AudioDataCollector:
         self.label_counts[label] = count
         
         # 保存先ディレクトリを指定
-        save_dir = f"../data/{texture}/{person}"
+        if not person:
+            save_dir = f"../data/{texture}"
+        else:
+            save_dir = f"../data/{texture}/{person}"
         os.makedirs(save_dir, exist_ok=True)  # ディレクトリが存在しない場合は作成
         
         filename = os.path.join(save_dir, f"{label}_{count}.wav")
