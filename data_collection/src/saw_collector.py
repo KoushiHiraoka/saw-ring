@@ -5,11 +5,12 @@ import wave
 import threading
 import os
 import socket
+import time
 
 # --- 音声録音の基本設定 ---
 FORMAT = pyaudio.paInt16  # 16ビットPCM
 CHANNELS = 1              # モノラル
-SAMPLE_RATE = 44100       # サンプリングレート
+SAMPLE_RATE = 48000       # サンプリングレート
 BUFFER_SIZE = 1024        # 一度に読み込むデータサイズ
 
 # --- UDP設定 ---
@@ -117,6 +118,7 @@ class AudioDataCollector:
         if not self.is_recording:
             self.is_recording = True
             self.audio_frames = [] # バッファをリセット
+            self.buffer = b''  # UDPバッファをリセット
             self.status_label.config(text="収集中...", fg="red")
 
             # UDPデータ受信スレッドを開始
@@ -129,9 +131,15 @@ class AudioDataCollector:
             self.is_recording = False # 録音スレッドに停止を知らせる
             print("録音停止！")
             self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
-            # ファイル保存は録音スレッドが終了してから行われる
 
+            # スレッドの終了を待機
+            if self.recording_thread.is_alive():
+                self.recording_thread.join()
+
+            # ファイル保存
             self.save_audio_file()
+
+            time.sleep(1.5)
 
     def record_audio(self):
         while self.is_recording:
