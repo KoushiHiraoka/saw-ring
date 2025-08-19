@@ -1,5 +1,4 @@
 #include <WiFi.h>
-#include <WiFiUdp.h>
 #include "driver/i2s_pdm.h"
 
 // I2Sピンの設定
@@ -14,21 +13,19 @@ constexpr size_t BUFFER_SIZE = 1024;
 
 // WiFi設定
 const char* ssid = "saw-ring";
-// const char* password = "password";
-constexpr int udpPort = 8000; 
-WiFiUDP udp;
+constexpr int tcpPort = 8000; 
+WiFiServer server(tcpPort);  // TCPサーバーを設定
+WiFiClient client;
 
 // 受信チャンネル
 int16_t i2s_read_buff[BUFFER_SIZE / sizeof(int16_t)];
 i2s_chan_handle_t rx_handle;
 
-
-
 void setup_wifi() {
   // ESP32をアクセスポイントとして設定
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
-    bool result = WiFi.softAP(ssid, nullptr);
+  bool result = WiFi.softAP(ssid, nullptr);
   if (result) {
       Serial.println("WiFi Access Point started successfully.");
   } else {
@@ -39,10 +36,11 @@ void setup_wifi() {
   Serial.print("AP IP address: ");
   Serial.println(IP);
 
-  udp.begin(udpPort);
+  server.begin();  // TCPサーバーを開始
+  Serial.println("TCP server started.");
 }
 
-void setup_i2s(){
+void setup_i2s() {
   // I2S PDM RXチャンネル
   i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_PORT, I2S_ROLE_MASTER);
   ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, NULL, &rx_handle));  
@@ -64,7 +62,6 @@ void setup_i2s(){
   ESP_ERROR_CHECK(i2s_channel_enable(rx_handle));
 
   Serial.println("I2S PDM RX 有効化");
-
 }
 
 void setup() {
@@ -77,22 +74,27 @@ void setup() {
 }
 
 void loop() {
-  size_t bytes_read = 0;
-
-  // PCM from I2S
-  esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, (250)); // タイムアウトを250msに設定
-  if (ret == ESP_OK && bytes_read > 0) {
-    // UDPでPCMデータを送信
-    IPAddress broadcastAddress = WiFi.softAPIP();
-    broadcastAddress[3] = 255;
-
-    if (udp.beginPacket(broadcastAddress, udpPort)) {
-      udp.write((uint8_t*)i2s_read_buff, bytes_read);
-      udp.endPacket();
-    } else {
-      Serial.println("Failed to start UDP");
+  if (!client || !client.connected()) {
+    client = server.available(); // 新しいクライアントを探す
+    if (client) {
+      Serial.println("New client connected.");
     }
-  } else {
-    Serial.printf("I2S Error Code: %d\n", ret);
+  }
+
+  if (client && client.connected()) {
+    size_t bytes_read = 0;
+    // I2SからPCMデータを読み込む
+    esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, (200));  // タイムアウトを200msに設定
+    
+    if (ret == ESP_OK && bytes_read > 0) {
+      // 読み取ったデータをTCPクライアントに送信
+      size_t bytes_sent = client.write((const uint8_t*)i2s_read_buff, bytes_read);
+      if (bytes_sent != bytes_read) {
+        Serial.println("Warning: TCP send failed or partial send.");
+      }
+    } else if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
+      // タイムアウト以外のエラー
+      Serial.printf("I2S Read Error: %d\n", ret);
+    }
   }
 }
