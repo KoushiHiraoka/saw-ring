@@ -7,7 +7,8 @@
 
 // I2S設定
 #define I2S_PORT            (I2S_NUM_0)   
-constexpr int SAMPLE_RATE = 48000;       
+// constexpr int SAMPLE_RATE = 48000; 
+constexpr int SAMPLE_RATE = 24000;   
 constexpr int BITS_PER_SAMPLE = 16;         
 constexpr size_t BUFFER_SIZE = 1024;
 

@@ -10,7 +10,7 @@ import time
 # --- 音声録音の基本設定 ---
 FORMAT = pyaudio.paInt16  # 16ビットPCM
 CHANNELS = 1              # モノラル
-SAMPLE_RATE = 48000       # サンプリングレート
+SAMPLE_RATE = 24000       # サンプリングレート
 BUFFER_SIZE = 1024        # 一度に読み込むデータサイズ
 
 # --- UDP設定 ---
@@ -59,8 +59,8 @@ class AudioDataCollector:
         self.status_label.pack(pady=20)
 
         # --- PyAudioの初期化 ---
-        self.p = pyaudio.PyAudio()
-        self.stream = None
+        # self.p = pyaudio.PyAudio()
+        # self.stream = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app) # ウィンドウのxボタンで終了
 
     def centering_window(self, width, height):
@@ -91,8 +91,8 @@ class AudioDataCollector:
     def start_collection(self):
         if not self.is_collecting_active:
             # オーディオストリームを開始
-            self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
-                                      input=True, frames_per_buffer=BUFFER_SIZE)
+            # self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
+            #                           input=True, frames_per_buffer=BUFFER_SIZE)
             self.is_collecting_active = True
             self.start_button.config(state=tk.DISABLED)
             self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
@@ -114,7 +114,7 @@ class AudioDataCollector:
                     raise ConnectionError("TCP connection lost.")
                 # バッファにデータを追加
                 self.buffer += raw_data
-                print(f"Received {len(raw_data)} bytes")
+                # print(f"Received {len(raw_data)} bytes")
             except ConnectionError as e:
                 print(f"接続エラー: {e}")
                 self.status_label.config(text="接続が切断されました。再接続を試みています...", fg="red")
