@@ -5,21 +5,22 @@ import wave
 import threading
 import os
 import socket
+import time
 
 # --- 音声録音の基本設定 ---
 FORMAT = pyaudio.paInt16  # 16ビットPCM
 CHANNELS = 1              # モノラル
-SAMPLE_RATE = 44100       # サンプリングレート
+SAMPLE_RATE = 24000       # サンプリングレート
 BUFFER_SIZE = 1024        # 一度に読み込むデータサイズ
 
 # --- UDP設定 ---
-ESP_IP = "0.0.0.0"  # ESP32のIPアドレス
+ESP_IP = "192.168.4.1"  # ESP32のIPアドレス
 PORT = 8000         # ポート番号
 num_samples = BUFFER_SIZE // 2
 unpack_format = f'<{num_samples}h'
 
-client = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-client.bind((ESP_IP, PORT))
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((ESP_IP, PORT))
 print(f"Connected to {ESP_IP}:{PORT}")
 
 class AudioDataCollector:
@@ -47,6 +48,9 @@ class AudioDataCollector:
         self.start_button = tk.Button(root, text="収集スタート", font=("Helvetica", 14), command=self.start_collection)
         self.start_button.pack(pady=20)
 
+        self.reset_button = tk.Button(root, text="リセット", font=("Helvetica", 14), command=self.reset_app)
+        self.reset_button.pack(pady=5)
+
         self.quit_button = tk.Button(root, text="終了", font=("Helvetica", 14), command=self.quit_app)
         self.quit_button.pack(pady=5)
         
@@ -58,16 +62,6 @@ class AudioDataCollector:
         self.p = pyaudio.PyAudio()
         self.stream = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app) # ウィンドウのxボタンで終了
-    
-    def centering_window(self, width, height):
-        # ウィンドウを画面の中央に配置
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        dx = screen_width // 2 - width // 2
-        dy = screen_height // 2 - height // 2
-        
-        return dx, dy
-
 
     def centering_window(self, width, height):
         # ウィンドウを画面の中央に配置
@@ -114,19 +108,43 @@ class AudioDataCollector:
 
         while self.is_recording:
             try:
-                # UDPデータを受信
-                raw_data, addr = client.recvfrom(BUFFER_SIZE)
+                # TCPデータを受信
+                raw_data = client.recv(BUFFER_SIZE)
+                if not raw_data:
+                    raise ConnectionError("TCP connection lost.")
                 # バッファにデータを追加
                 self.buffer += raw_data
-                print(f"Received {len(raw_data)} bytes")
+                # print(f"Received {len(raw_data)} bytes")
+            except ConnectionError as e:
+                print(f"接続エラー: {e}")
+                self.status_label.config(text="接続が切断されました。再接続を試みています...", fg="red")
+                self.reconnect()
             except Exception as e:
-                if not self.is_recording:
-                    print(f"エラーが発生しました: {e}")
+                print(f"エラーが発生しました: {e}")
+                break
+
+    def reconnect(self):
+        global client
+        while self.is_recording:
+            try:
+                print("再接続を試みています...")
+                self.status_label.config(text="通信が切断されました。再接続中・・・", fg="red")
+                client.close()  # 古いソケットを閉じる
+                client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                time.sleep(1)  # 再接続前に少し待機
+                client.connect((ESP_IP, PORT))  # 再接続
+                print(f"再接続成功: {ESP_IP}:{PORT}")
+                self.status_label.config(text="再接続成功", fg="green")
+                break
+            except Exception as e:
+                print(f"再接続失敗: {e}")
+                time.sleep(2)  # 再接続失敗時に待機
 
     def on_key_press(self, event):
         if not self.is_recording:
             self.is_recording = True
             self.audio_frames = [] # バッファをリセット
+            self.buffer = b''  # UDPバッファをリセット
             self.status_label.config(text="収集中...", fg="red")
 
             # UDPデータ受信スレッドを開始
@@ -139,9 +157,15 @@ class AudioDataCollector:
             self.is_recording = False # 録音スレッドに停止を知らせる
             print("録音停止！")
             self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
-            # ファイル保存は録音スレッドが終了してから行われる
 
+            # スレッドの終了を待機
+            if self.recording_thread.is_alive():
+                self.recording_thread.join()
+
+            # ファイル保存
             self.save_audio_file()
+
+            time.sleep(0.5)
 
     def record_audio(self):
         while self.is_recording:
@@ -163,7 +187,10 @@ class AudioDataCollector:
         self.label_counts[label] = count
         
         # 保存先ディレクトリを指定
-        save_dir = f"../data/{texture}/{person}"
+        if not person:
+            save_dir = f"../data/{texture}"
+        else:
+            save_dir = f"../data/{texture}/{person}"
         os.makedirs(save_dir, exist_ok=True)  # ディレクトリが存在しない場合は作成
         
         filename = os.path.join(save_dir, f"{label}_{count}.wav")
@@ -181,6 +208,41 @@ class AudioDataCollector:
             self.status_label.config(text=f"保存完了: {filename}", fg="green")
         
         print(f"ファイル {filename} を保存しました。")
+
+    def reset_app(self):
+        self.previous_texture = self.texture_entry.get()
+        if not self.previous_texture:
+            self.previous_texture = "skin"
+        self.previous_label = self.label_entry.get()
+        if not self.previous_label:
+            self.previous_label = "swipe"
+        self.previous_person = self.person_entry.get()
+        if not self.previous_person:
+            self.previous_person = "person_0"
+
+    
+        # 入力フィールドをクリア
+        self.texture_entry.delete(0, tk.END)
+        self.texture_entry.insert(0, self.previous_texture)
+        self.label_entry.delete(0, tk.END)
+        self.label_entry.insert(0, self.previous_label)
+        self.person_entry.delete(0, tk.END)
+        self.person_entry.insert(0, "person_0")
+
+        # 状態をリセット
+        self.is_collecting_active = False
+        self.is_recording = False
+        self.audio_frames = []
+        self.label_counts = {}
+
+        # ステータスラベルを初期状態に戻す
+        self.status_label.config(text="「収集スタート」を押してください", fg="black")
+
+        # ボタンの状態をリセット
+        self.start_button.config(state=tk.NORMAL)
+
+        print("アプリがリセットされました。")
+
 
     def quit_app(self):
         if self.is_recording:
