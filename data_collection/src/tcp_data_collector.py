@@ -59,8 +59,8 @@ class AudioDataCollector:
         self.status_label.pack(pady=20)
 
         # --- PyAudioの初期化 ---
-        # self.p = pyaudio.PyAudio()
-        # self.stream = None
+        self.p = pyaudio.PyAudio()
+        self.stream = None
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app) # ウィンドウのxボタンで終了
 
     def centering_window(self, width, height):
@@ -91,8 +91,8 @@ class AudioDataCollector:
     def start_collection(self):
         if not self.is_collecting_active:
             # オーディオストリームを開始
-            # self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
-            #                           input=True, frames_per_buffer=BUFFER_SIZE)
+            self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
+                                      input=True, frames_per_buffer=BUFFER_SIZE)
             self.is_collecting_active = True
             self.start_button.config(state=tk.DISABLED)
             self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
