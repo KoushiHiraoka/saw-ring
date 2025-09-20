@@ -1,8 +1,7 @@
 pyserial
 numpy
 matplotlib
-
 PyQt6
 pyqtgraph
-
 pyaudio
+streamlit
