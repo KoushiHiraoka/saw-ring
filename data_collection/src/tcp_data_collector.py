@@ -121,7 +121,7 @@ class AudioDataCollector:
                 self.reconnect()
             except Exception as e:
                 print(f"エラーが発生しました: {e}")
-                break
+                raise
 
     def reconnect(self):
         global client
