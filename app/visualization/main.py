@@ -69,7 +69,7 @@ class DataWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PyQtGraph リアルタイム波形モニター")
+        self.setWindowTitle("リアルタイムSAW波形表示")
         self.setGeometry(100, 100, 1000, 500)
 
         # PyQtGraphのプロットウィジェットを作成
