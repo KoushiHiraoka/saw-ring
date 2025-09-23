@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         # プロットウィジェット
         pg.setConfigOptions(antialias=True)
         self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground('w')
         main_layout.addWidget(self.plot_widget, stretch=1)
 
         # 操作パネル
@@ -129,7 +130,7 @@ class MainWindow(QMainWindow):
         # 波形プロット用データ
         self.plot_data_size = NUM_SAMPLES * 10
         self.y_data = np.zeros(self.plot_data_size)
-        self.waveform_pen = pg.mkPen(color=(0, 120, 215), width=2)
+        self.waveform_pen = pg.mkPen(color=(0, 120, 215), width=8)
         self.waveform_plot_item = self.plot_widget.plot(self.y_data, pen=self.waveform_pen, name="Waveform")
 
         # FFTプロット用データ
