@@ -8,7 +8,7 @@
 
 // I2S設定
 #define I2S_PORT            (I2S_NUM_0)   
-constexpr int SAMPLE_RATE = 44100;       
+constexpr int SAMPLE_RATE = 48000;       
 constexpr int BITS_PER_SAMPLE = 16;         
 constexpr size_t BUFFER_SIZE = 1024;
 
@@ -28,7 +28,7 @@ void setup_wifi() {
   // ESP32をアクセスポイントとして設定
   WiFi.disconnect(true);
   WiFi.mode(WIFI_AP);
-    bool result = WiFi.softAP(ssid, nullptr);
+  bool result = WiFi.softAP(ssid, nullptr);
   if (result) {
       Serial.println("WiFi Access Point started successfully.");
   } else {
@@ -80,7 +80,7 @@ void loop() {
   size_t bytes_read = 0;
 
   // PCM from I2S
-  esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, (100)); // タイムアウトを100msに設定
+  esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, (250)); // タイムアウトを250msに設定
   if (ret == ESP_OK && bytes_read > 0) {
     // UDPでPCMデータを送信
     IPAddress broadcastAddress = WiFi.softAPIP();
