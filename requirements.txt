@@ -6,3 +6,5 @@ pyqtgraph
 pyaudio
 streamlit
 scipy
+librosa
+scikit-learn==1.7.2

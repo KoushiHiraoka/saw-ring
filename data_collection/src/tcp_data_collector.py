@@ -40,9 +40,10 @@ class AudioDataCollector:
 
         # --- GUIウィジェットの作成 ---
         # ラベル入力
-        self.texture_entry = self.entry_pair(root, "Texture", pady=(100, 50), insert="skin")
-        self.label_entry = self.entry_pair(root, "Gesture", pady=(0, 50), insert="swipe")
-        self.person_entry = self.entry_pair(root, "Person", pady=(0, 50), insert="person_0")
+        self.texture_entry = self.entry_pair(root, "Texture", pady=(100, 10), insert="")
+        self.label_entry = self.entry_pair(root, "Gesture", pady=(0, 10), insert="")
+        self.person_entry = self.entry_pair(root, "Person", pady=(0, 10), insert="")
+        self.index_entry = self.entry_pair(root, "Index", pady=(0, 10), insert="1")
 
         # ボタン
         self.start_button = tk.Button(root, text="収集スタート", font=("Helvetica", 14), command=self.start_collection)
@@ -180,10 +181,10 @@ class AudioDataCollector:
         texture = self.texture_entry.get().strip()
         if not label:
             label = "unknown"
-            print("ラベルが入力されていません")         
-            
+            print("ラベルが入力されていません")
+        initial_count = int(self.index_entry.get().strip()) - 1
         # ラベルのカウンターを更新
-        count = self.label_counts.get(label, 0) + 1
+        count = self.label_counts.get(label, initial_count) + 1
         self.label_counts[label] = count
         
         # 保存先ディレクトリを指定
