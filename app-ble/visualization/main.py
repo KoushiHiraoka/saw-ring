@@ -3,13 +3,14 @@ import asyncio
 import numpy as np
 from scipy import fft
 from bleak import BleakScanner, BleakClient
-
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 import pyqtgraph as pg
+from collections import deque
+from PyQt6.QtCore import QTimer
 
 # --- 基本設定 (BLE用に変更) ---
 DEVICE_NAME = "SAW-Ring"
@@ -37,18 +38,18 @@ class DataWorker(QObject):
         self.disconnected_event = asyncio.Event()
 
     def notification_handler(self, sender, data: bytearray):
-        """BLEデバイスからデータ(チャンク)を受信するたびに呼び出されるコールバック"""
-        self.buffer += data
         
-        # 定められたバッファサイズに達するまでデータを溜める
-        while len(self.buffer) >= BUFFER_SIZE:
-            data_to_process = self.buffer[:BUFFER_SIZE]
-            self.buffer = self.buffer[BUFFER_SIZE:]
+        # self.buffer += data
+        
+        # # 定められたバッファサイズに達するまでデータを溜める
+        # while len(self.buffer) >= BUFFER_SIZE:
+        #     data_to_process = self.buffer[:BUFFER_SIZE]
+        #     self.buffer = self.buffer[BUFFER_SIZE:]
             
-            pcm_data = np.frombuffer(data_to_process, dtype=DTYPE)
-            if pcm_data.size > 0:
-                normalized_data = pcm_data / 32768.0
-                self.data_ready.emit(normalized_data)
+        pcm_data = np.frombuffer(data, dtype=DTYPE)
+        if pcm_data.size > 0:
+            normalized_data = pcm_data / 32768.0
+            self.data_ready.emit(normalized_data)
 
     async def main_ble_loop(self):
         """BLEデバイスのスキャン、接続、データ受信待機を行うメインループ"""
@@ -109,6 +110,11 @@ class MainWindow(QMainWindow):
 
         self.worker = None
         self.thread = None
+
+        self.data_buffer = deque()
+        self.plot_timer = QTimer(self)
+        self.plot_timer.setInterval(16)  # 約60fps
+        self.plot_timer.timeout.connect(self.triggered_update_plot)
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -194,11 +200,12 @@ class MainWindow(QMainWindow):
         if self.thread and self.thread.isRunning():
             return
         
+        self.data_buffer.clear()
         self.thread = QThread()
         self.worker = DataWorker()
         self.worker.moveToThread(self.thread)
 
-        self.worker.data_ready.connect(self.update_plot)
+        self.worker.data_ready.connect(self.queue_data)
         self.worker.connection_success.connect(self._on_connection_success)
         self.worker.connection_failed.connect(self._on_connection_failed)
         self.worker.connection_lost.connect(self._on_connection_lost)
@@ -208,10 +215,13 @@ class MainWindow(QMainWindow):
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.finished.connect(self.worker.deleteLater)
         self.thread.start()
+
+        self.plot_timer.start()
         
         self.start_button.setEnabled(False)
 
     def stop_plotting(self):
+        self.plot_timer.stop()
         if self.worker:
             self.worker.stop()
         if self.thread:
@@ -226,14 +236,37 @@ class MainWindow(QMainWindow):
         self.toggle_button.setEnabled(False)
         self.status_label.setText("状態: <font color='red'><b>切断</b></font>")
 
+    def queue_data(self, new_data):
+        """Workerからデータを受け取り、バッファに追加するだけ"""
+        self.data_buffer.append(new_data)
+
+    def triggered_update_plot(self):
+        """QTimerによって呼び出され、バッファのデータをまとめて描画する"""
+        if not self.data_buffer:
+            return
+
+        # バッファに溜まったデータを全て連結して一つの塊にする
+        all_new_data = np.concatenate(list(self.data_buffer))
+        self.data_buffer.clear()
+        
+        # 描画処理は update_plot に任せる
+        self.update_plot(all_new_data)
+
     def update_plot(self, new_data):
+        """実際にプロットを更新する処理"""
+        num_new_samples = len(new_data)
+        if num_new_samples == 0:
+            return
+
         if self.display_mode == 'waveform':
-            self.y_data = np.roll(self.y_data, -NUM_SAMPLES)
-            self.y_data[-NUM_SAMPLES:] = new_data
-            display_data = self.y_data - np.mean(self.y_data)
-            self.waveform_plot_item.setData(display_data)
+            # np.rollを使う代わりに、スライスで効率的に更新
+            self.y_data[:-num_new_samples] = self.y_data[num_new_samples:]
+            self.y_data[-num_new_samples:] = new_data
+            self.waveform_plot_item.setData(self.y_data)
         else: # 'fft'
-            processed_data = new_data - np.mean(new_data)
+            # FFTは最後の一定数のデータで行う (例: NUM_SAMPLES)
+            fft_data = new_data[-NUM_SAMPLES:]
+            processed_data = fft_data - np.mean(fft_data)
             window = np.hanning(len(processed_data))
             fft_result = fft.rfft(processed_data * window)
             self.fft_power = np.abs(fft_result)

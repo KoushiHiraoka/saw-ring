@@ -6,7 +6,7 @@
 
 // I2Sピンの設定 (変更なし)
 #define I2S_PDM_CLK_IO      (GPIO_NUM_3)  // CLK
-#define I2S_PDM_DIN_IO      (GPIO_NUM_1)  // DATA
+#define I2S_PDM_DIN_IO      (GPIO_NUM_2)  // DATA
 
 // I2S設定 (変更なし)
 #define I2S_PORT            (I2S_NUM_0)
@@ -23,6 +23,8 @@ BLECharacteristic *pCharacteristic;
 bool deviceConnected = false;
 int16_t i2s_read_buff[BUFFER_SIZE / sizeof(int16_t)];
 i2s_chan_handle_t rx_handle;
+TaskHandle_t I2S_TaskHandle;
+
 
 // BLEサーバーの接続/切断イベントを処理するコールバッククラス
 class MyServerCallbacks: public BLEServerCallbacks {
@@ -65,6 +67,36 @@ void setup_i2s() {
   Serial.println("I2S PDM RX enabled.");
 }
 
+// I2SとBLEの処理を行うタスク関数
+void i2s_ble_task(void *pvParameters) {
+  Serial.println("I2S BLE Task started on core 0.");
+  for(;;) { // loop()の代わり
+    if (deviceConnected) {
+      size_t bytes_read = 0;
+      esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, pdMS_TO_TICKS(50));
+      
+      if (ret == ESP_OK && bytes_read > 0) {
+        const int mtu = BLEDevice::getMTU();
+        const size_t chunkSize = mtu > 23 ? mtu - 3 : 20;
+
+        for (size_t i = 0; i < bytes_read; i += chunkSize) {
+          size_t len = (bytes_read - i < chunkSize) ? (bytes_read - i) : chunkSize;
+          
+          pCharacteristic->setValue((uint8_t*)i2s_read_buff + i, len);
+          pCharacteristic->notify();
+          vTaskDelay(pdMS_TO_TICKS(1)); 
+        }
+      } else if (ret != ESP_OK && ret != ESP_ERR_TIMEOUT) {
+        Serial.printf("I2S Read Error: %d\n", ret);
+      }
+    } else {
+      // 接続されていないときはタスクを少し待機させる
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+  }
+}
+
+
 void setup() {
   // デバッグ用のシリアル通信を開始 (高速なデータ通信のためボーレートを上げることを推奨)
   Serial.begin(115200);
@@ -101,30 +133,47 @@ void setup() {
 
   // I2Sのセットアップ
   setup_i2s();
+  
+  // I2SとBLEの処理を行うタスクをコア0で起動
+  xTaskCreatePinnedToCore(
+    i2s_ble_task,     // タスク関数
+    "I2S BLE Task",   // タスク名
+    4096,             // スタックサイズ
+    NULL,             // タスクのパラメータ
+    1,                // 優先度
+    &I2S_TaskHandle,  // タスクハンドル
+    0                 // 実行するコア (0)
+  );
 }
 
 void loop() {
-  // クライアントが接続されている場合のみデータを送信
-  if (deviceConnected) {
-    size_t bytes_read = 0;
-    // I2SからPCMデータを読み込む (データが来るまで待機)
-    esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, portMAX_DELAY);
-    
-    if (ret == ESP_OK && bytes_read > 0) {
-      // BLEで一度に送信できるデータサイズ(MTU)には限りがあるため、データを分割して送信
-      const int mtu = BLEDevice::getMTU();
-      // ヘッダ(3バイト)を除いたペイロードサイズをチャンクサイズとする
-      const size_t chunkSize = mtu > 23 ? mtu - 3 : 20;
 
-      for (size_t i = 0; i < bytes_read; i += chunkSize) {
-        size_t len = (bytes_read - i < chunkSize) ? (bytes_read - i) : chunkSize;
-        
-        // 分割したデータをセットしてクライアントに通知(Notify)
-        pCharacteristic->setValue((uint8_t*)i2s_read_buff + i, len);
-        pCharacteristic->notify();
-      }
-    } else if (ret != ESP_OK) {
-      Serial.printf("I2S Read Error: %d\n", ret);
-    }
-  }
 }
+
+// void loop() {
+//   // クライアントが接続されている場合のみデータを送信
+//   if (deviceConnected) {
+//     size_t bytes_read = 0;
+//     // I2SからPCMデータを読み込む (データが来るまで待機)
+//     esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, pdMS_TO_TICKS(100));
+    
+//     if (ret == ESP_OK && bytes_read > 0) {
+//       // BLEで一度に送信できるデータサイズ(MTU)には限りがあるため、データを分割して送信
+//       const int mtu = BLEDevice::getMTU();
+//       // ヘッダ(3バイト)を除いたペイロードサイズをチャンクサイズとする
+//       const size_t chunkSize = mtu > 23 ? mtu - 3 : 20;
+
+//       for (size_t i = 0; i < bytes_read; i += chunkSize) {
+//         size_t len = (bytes_read - i < chunkSize) ? (bytes_read - i) : chunkSize;
+        
+//         // 分割したデータをセットしてクライアントに通知(Notify)
+//         pCharacteristic->setValue((uint8_t*)i2s_read_buff + i, len);
+//         pCharacteristic->notify();
+
+//         vTaskDelay(pdMS_TO_TICKS(1));
+//       }
+//     } else if (ret != ESP_OK) {
+//       Serial.printf("I2S Read Error: %d\n", ret);
+//     }
+//   }
+// }

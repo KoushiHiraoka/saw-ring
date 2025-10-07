@@ -8,11 +8,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 import pyqtgraph as pg
-import time
-
-from PyQt6.QtCore import QThread, pyqtSignal, QObject, QTimer
-import pyqtgraph as pg
-from collections import deque
 
 # --- 基本設定 ---
 ESP_IP = "192.168.4.1"
@@ -56,8 +51,6 @@ class DataWorker(QObject):
                 
                 # 厳密にBUFFER_SIZEごとに処理
                 while len(buffer) >= BUFFER_SIZE:
-                    loop_start = time.perf_counter()
-
                     data_to_process = buffer[:BUFFER_SIZE]
                     buffer = buffer[BUFFER_SIZE:]
                     
@@ -65,10 +58,6 @@ class DataWorker(QObject):
                     if pcm_data.size > 0:
                         normalized_data = pcm_data / 32768.0
                         self.data_ready.emit(normalized_data)
-                    
-                    loop_end = time.perf_counter()
-                    elapsed = loop_end - loop_start
-                    print(f"データ受信速度: {elapsed*1000:.3f} ms")
 
             except socket.timeout:
                 continue # タイムアウトは許容
@@ -98,14 +87,6 @@ class MainWindow(QMainWindow):
 
         self.worker = None
         self.thread = None
-
-        # dequeは高速に要素を追加・削除できるリストのようなもの
-        self.data_buffer = deque()
-
-        # 描画更新用のタイマー
-        self.plot_timer = QTimer(self)
-        self.plot_timer.setInterval(16) # 約30fps (1000ms / 30)
-        self.plot_timer.timeout.connect(self.triggered_update_plot)
 
     def _setup_ui(self):
         """UIウィジェットの作成とレイアウト設定"""
@@ -212,21 +193,18 @@ class MainWindow(QMainWindow):
         self.worker = DataWorker()
         self.worker.moveToThread(self.thread)
 
-        # self.worker.data_ready.connect(self.update_plot)
-        self.worker.data_ready.connect(self.queue_data)
+        self.worker.data_ready.connect(self.update_plot)
         self.worker.connection_success.connect(self._on_connection_success)
         self.worker.connection_failed.connect(self._on_connection_failed)
         self.worker.connection_lost.connect(self._on_connection_lost)
         
         self.thread.started.connect(self.worker.run)
         self.thread.start()
-        self.plot_timer.start()
         
         self.start_button.setEnabled(False)
         self.status_label.setText("状態: <font color='orange'><b>接続中...</b></font>")
 
     def stop_plotting(self):
-        self.plot_timer.stop()
         """描画・通信停止処理"""
         if self.worker:
             self.worker.stop()
@@ -242,12 +220,8 @@ class MainWindow(QMainWindow):
         self.toggle_button.setEnabled(False)
         self.status_label.setText("状態: <font color='red'><b>切断</b></font>")
 
-    def queue_data(self, new_data):
-        self.data_buffer.append(new_data)
-
     def update_plot(self, new_data):
         """Workerからデータを受け取り、現在のモードに応じてプロットを更新"""
-        update_start = time.perf_counter()
 
         if self.display_mode == 'waveform':
             self.y_data = np.roll(self.y_data, -NUM_SAMPLES)
@@ -256,10 +230,6 @@ class MainWindow(QMainWindow):
 
             # 処理後のデータをプロットにセットする
             self.waveform_plot_item.setData(display_data)
-            update_end = time.perf_counter()
-            elapsed_update = update_end - update_start
-            
-            print(f"描画更新時間: {elapsed_update*1000:.2f} ms")
 
         else:
             # FFTを計算して更新
@@ -271,61 +241,6 @@ class MainWindow(QMainWindow):
             self.fft_power = np.abs(fft_result)
             self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
 
-    def triggered_update_plot(self):
-        """
-        ★ QTimerによって呼び出され、バッファのデータをまとめて描画する
-        """
-
-        update_start = time.perf_counter()
-
-        if not self.data_buffer:
-            return # バッファにデータがなければ何もしない
-
-        # バッファに溜まっているデータを全て取り出す
-        # 今回は最新のデータ1つだけで更新するシンプルな例
-        # 連続性を重視する場合は、溜まったデータを全て処理するループをここに書く
-        data_to_plot = self.data_buffer.popleft()
-        # バッファを空にする場合は self.data_buffer.clear() でも良い
-
-        if self.display_mode == 'waveform':
-            self.y_data[:-NUM_SAMPLES] = self.y_data[NUM_SAMPLES:]
-            self.y_data[-NUM_SAMPLES:] = data_to_plot
-            self.waveform_plot_item.setData(self.y_data)
-            update_endd = time.perf_counter()
-            elapsed_update = update_endd - update_start
-
-            print(f"描画更新時間: {elapsed_update*1000:.3f} ms")
-        else:
-            processed_data = data_to_plot - np.mean(data_to_plot)
-            window = np.hanning(len(processed_data))
-            fft_result = fft.rfft(processed_data * window)
-            self.fft_power = np.abs(fft_result)
-            self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
-    
-        # while self.data_buffer:
-        #     new_data = self.data_buffer.popleft()
-
-        #     # 波形表示用のデータ配列(self.y_data)を更新
-        #     if self.display_mode == 'waveform':
-        #         self.y_data[:-NUM_SAMPLES] = self.y_data[NUM_SAMPLES:]
-        #         self.y_data[-NUM_SAMPLES:] = new_data
-            
-        #     # FFT表示用のデータも更新しておく（表示されていなくても計算だけする）
-        #     # こうすることで、モード切替時に最新のFFTが表示される
-        #     else:
-        #         # この部分は、実際にFFT表示モードの時だけ計算する方がより効率的
-        #         # しかし、計算負荷は低いのでこのままでも問題ないことが多い
-        #         processed_data = new_data - np.mean(new_data)
-        #         window = np.hanning(len(processed_data))
-        #         fft_result = fft.rfft(processed_data * window)
-        #         self.fft_power = np.abs(fft_result)
-
-        # # --- 描画処理はループの外で、最後に一回だけ！ ---
-        # if self.display_mode == 'waveform':
-        #     self.waveform_plot_item.setData(self.y_data)
-        # else:
-        #     self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
-    
     # --- 接続状態に関するスロット ---
     def _on_connection_success(self):
         self.stop_button.setEnabled(True)

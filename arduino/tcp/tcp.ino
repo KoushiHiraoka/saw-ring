@@ -3,7 +3,7 @@
 
 // I2Sピンの設定
 #define I2S_PDM_CLK_IO      (GPIO_NUM_3)  // CLK
-#define I2S_PDM_DIN_IO      (GPIO_NUM_1)  // DATA
+#define I2S_PDM_DIN_IO      (GPIO_NUM_2)  // DATA
 
 // I2S設定
 #define I2S_PORT            (I2S_NUM_0)   
@@ -67,7 +67,7 @@ void setup_i2s() {
 
 void setup() {
   // デバッグ用
-  Serial.begin(9600);
+  Serial.begin(115200);
   Serial.println("Start SAW-Ring");
 
   setup_wifi();
@@ -85,11 +85,13 @@ void loop() {
   if (client && client.connected()) {
     size_t bytes_read = 0;
     // I2SからPCMデータを読み込む
-    esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, (200));  // タイムアウトを200msに設定
+    esp_err_t ret = i2s_channel_read(rx_handle, i2s_read_buff, BUFFER_SIZE, &bytes_read, (100));  // タイムアウトを100msに設定
     
     if (ret == ESP_OK && bytes_read > 0) {
       // 読み取ったデータをTCPクライアントに送信
+      Serial.println("Sending to client...");
       size_t bytes_sent = client.write((const uint8_t*)i2s_read_buff, bytes_read);
+      Serial.println("Send completed");
       if (bytes_sent != bytes_read) {
         Serial.println("Warning: TCP send failed or partial send.");
       }
