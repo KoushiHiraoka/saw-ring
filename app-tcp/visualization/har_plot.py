@@ -225,15 +225,13 @@ class MainWindow(QMainWindow):
 
         if self.display_mode == 'waveform':
             self.y_data = np.roll(self.y_data, -NUM_SAMPLES)
-            self.y_data[-NUM_SAMPLES:] = new_data # 未処理のデータをまず連結
+            self.y_data[-NUM_SAMPLES:] = new_data # 未処理のデータをまず連結CD
+            display_data = self.y_data
 
-            # 表示するデータ全体からDCオフセットを除去する
-            display_data = self.y_data - np.mean(self.y_data)
-            
             # 処理後のデータをプロットにセットする
             self.waveform_plot_item.setData(display_data)
 
-        else: # 'fft'
+        else:
             # FFTを計算して更新
             processed_data = new_data - np.mean(new_data)
             # ハニング窓を適用してスペクトル漏れを軽減
