@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel
 )
+import time
 from PyQt6.QtCore import QThread, pyqtSignal, QObject
 import pyqtgraph as pg
 from collections import deque
@@ -240,33 +241,61 @@ class MainWindow(QMainWindow):
         """Workerからデータを受け取り、バッファに追加するだけ"""
         self.data_buffer.append(new_data)
 
+    # def triggered_update_plot(self):
+    #     """QTimerによって呼び出され、バッファのデータをまとめて描画する"""
+    #     if not self.data_buffer:
+    #         return
+
+    #     # バッファに溜まったデータを全て連結して一つの塊にする
+    #     all_new_data = np.concatenate(list(self.data_buffer))
+    #     self.data_buffer.clear()
+        
+    #     # 描画処理は update_plot に任せる
+    #     self.update_plot(all_new_data)
+
+    # def update_plot(self, new_data):
+    #     """実際にプロットを更新する処理"""
+    #     num_new_samples = len(new_data)
+    #     if num_new_samples == 0:
+    #         return
+
+    #     if self.display_mode == 'waveform':
+    #         # np.rollを使う代わりに、スライスで効率的に更新
+    #         self.y_data[:-num_new_samples] = self.y_data[num_new_samples:]
+    #         self.y_data[-num_new_samples:] = new_data
+    #         self.waveform_plot_item.setData(self.y_data)
+    #     else: # 'fft'
+    #         # FFTは最後の一定数のデータで行う (例: NUM_SAMPLES)
+    #         fft_data = new_data[-NUM_SAMPLES:]
+    #         processed_data = fft_data - np.mean(fft_data)
+    #         window = np.hanning(len(processed_data))
+    #         fft_result = fft.rfft(processed_data * window)
+    #         self.fft_power = np.abs(fft_result)
+    #         self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
+
     def triggered_update_plot(self):
-        """QTimerによって呼び出され、バッファのデータをまとめて描画する"""
+        """
+        ★ QTimerによって呼び出され、バッファのデータをまとめて描画する
+        """
+
+        update_start = time.perf_counter()
+
         if not self.data_buffer:
             return
-
-        # バッファに溜まったデータを全て連結して一つの塊にする
-        all_new_data = np.concatenate(list(self.data_buffer))
-        self.data_buffer.clear()
         
-        # 描画処理は update_plot に任せる
-        self.update_plot(all_new_data)
-
-    def update_plot(self, new_data):
-        """実際にプロットを更新する処理"""
-        num_new_samples = len(new_data)
-        if num_new_samples == 0:
-            return
+        data_to_plot = self.data_buffer.popleft()
+        
 
         if self.display_mode == 'waveform':
-            # np.rollを使う代わりに、スライスで効率的に更新
-            self.y_data[:-num_new_samples] = self.y_data[num_new_samples:]
-            self.y_data[-num_new_samples:] = new_data
+            self.y_data[:-NUM_SAMPLES] = self.y_data[NUM_SAMPLES:]
+            self.y_data[-NUM_SAMPLES:] = data_to_plot
             self.waveform_plot_item.setData(self.y_data)
-        else: # 'fft'
-            # FFTは最後の一定数のデータで行う (例: NUM_SAMPLES)
-            fft_data = new_data[-NUM_SAMPLES:]
-            processed_data = fft_data - np.mean(fft_data)
+            update_endd = time.perf_counter()
+            elapsed_update = update_endd - update_start
+
+            print(f"描画更新時間: {elapsed_update*1000:.3f} ms")
+        else:
+            processed_data = data_to_plot - np.mean(data_to_plot)
             window = np.hanning(len(processed_data))
             fft_result = fft.rfft(processed_data * window)
             self.fft_power = np.abs(fft_result)
