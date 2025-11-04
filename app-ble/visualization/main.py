@@ -109,7 +109,7 @@ class DataWorker(QObject):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("リアルタイム波形・周波数解析")
+        self.setWindowTitle("Real-time Waveform and Spectrogram")
         self.setGeometry(100, 100, 1000, 600)
 
         self.display_mode = 'waveform'
@@ -180,7 +180,7 @@ class MainWindow(QMainWindow):
         cmap = pg.colormap.get('viridis')
         self.image_item.setLookupTable(cmap.getLookupTable())
         # dBの最小/最大値を設定 (-60dB から 0dB の範囲で色付け)
-        self.image_item.setLevels([-90, 0])        
+        self.image_item.setLevels([-60, 0])        
         self.image_item.setImage(self.spectro_data.T)
 
         self.image_item.hide()
@@ -197,7 +197,7 @@ class MainWindow(QMainWindow):
             self._setup_waveform_view()
 
     def _setup_waveform_view(self):
-        self.plot_widget.setTitle("リアルタイム波形")
+        self.plot_widget.setTitle("SAWデータ")
         self.plot_widget.setLabel('left', 'Amplitude')
         self.plot_widget.setLabel('bottom', 'Time (Samples)')
         self.plot_widget.setYRange(-1.1, 1.1)
@@ -219,7 +219,7 @@ class MainWindow(QMainWindow):
     #     self.fft_plot_item.show()
 
     def _setup_spectrogram_view(self):
-        self.plot_widget.setTitle("リアルタイム メルスペクトログラム")
+        self.plot_widget.setTitle("ヒートマップ")
         
         # Y軸はメルビン、X軸は時間フレーム
         self.plot_widget.setLabel('left', 'Mel Bins')
@@ -238,6 +238,9 @@ class MainWindow(QMainWindow):
     def start_plotting(self):
         if self.thread and self.thread.isRunning():
             return
+        # 新しいサブウィンドウを開く
+        self.spectro_window = SpectrogramWindow()
+        self.spectro_window.show()
         
         self.data_buffer.clear()
         self.thread = QThread()
@@ -267,6 +270,11 @@ class MainWindow(QMainWindow):
             self.thread.quit()
             self.thread.wait()
 
+        # サブウィンドウも閉じる
+        if self.spectro_window:
+            self.spectro_window.close()
+            self.spectro_window = None
+
         self.thread = None
         self.worker = None
 
@@ -291,6 +299,10 @@ class MainWindow(QMainWindow):
             return
         
         data_to_plot = self.data_buffer.popleft()
+
+        # サブウィンドウにもデータを送る
+        if self.spectro_window:
+            self.spectro_window.update_plot(data_to_plot)
         
 
         if self.display_mode == 'waveform':
@@ -353,7 +365,73 @@ class MainWindow(QMainWindow):
         self.stop_plotting()
         event.accept()
 
-# --- アプリケーションの実行 ---
+class SpectrogramWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ヒートマップ")
+        self.setGeometry(110, 110, 800, 400) # メインと少しずらす
+
+        # --- スペクトログラムの初期化 (MainWindowから移植) ---
+        self.spectro_data = np.full((N_MELS, SPECTRO_TIME_STEPS), -60.0)
+
+        # --- UIセットアップ ---
+        main_layout = QVBoxLayout(self)
+        pg.setConfigOptions(antialias=True)
+        
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground('w')
+        main_layout.addWidget(self.plot_widget)
+        
+        # --- プロットの初期化 ---
+        self.image_item = pg.ImageItem()
+        self.plot_widget.addItem(self.image_item)
+        cmap = pg.colormap.get('viridis')
+        self.image_item.setLookupTable(cmap.getLookupTable())
+        
+        # ★ チューニングしたdB範囲 (ref=1.0 と併用)
+        self.image_item.setLevels([-30, 0]) 
+        
+        self.image_item.setImage(self.spectro_data.T)
+        self._setup_spectrogram_view()
+        print("サブのスペクトログラムウィンドウ準備完了")
+
+    def _setup_spectrogram_view(self):
+        self.plot_widget.setTitle("ヒートマップ")
+        self.plot_widget.setLabel('left', 'Mel Bins')
+        self.plot_widget.setLabel('bottom', 'Time (Frames)')
+        
+        self.image_item.setRect(0, 0, SPECTRO_TIME_STEPS, N_MELS)
+        self.plot_widget.setXRange(0, SPECTRO_TIME_STEPS)
+        self.plot_widget.setYRange(0, N_MELS)
+        self.plot_widget.showGrid(x=False, y=False)
+
+    def update_plot(self, data_to_plot: np.ndarray):
+        try:
+            S = librosa.feature.melspectrogram(
+                y=data_to_plot, 
+                sr=SAMPLE_RATE, 
+                n_fft=N_FFT, 
+                hop_length=HOP_LENGTH, 
+                n_mels=N_MELS
+            )
+            
+            # ★ 基準を 1.0 に固定 (絶対dB)
+            S_db = librosa.power_to_db(S, ref=1.0) 
+            
+            num_new_frames = S_db.shape[1]
+            if num_new_frames == 0:
+                return
+            if num_new_frames > SPECTRO_TIME_STEPS:
+                S_db = S_db[:, -SPECTRO_TIME_STEPS:]
+                num_new_frames = SPECTRO_TIME_STEPS
+
+            self.spectro_data = np.roll(self.spectro_data, -num_new_frames, axis=1)
+            self.spectro_data[:, -num_new_frames:] = S_db
+            self.image_item.setImage(self.spectro_data.T, autoLevels=False)
+        except Exception as e:
+            print(f"サブスペクトログラム更新エラー: {e}")
+
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = MainWindow()
