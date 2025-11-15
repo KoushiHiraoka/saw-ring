@@ -6,6 +6,7 @@ import threading
 import os
 import socket
 import time
+import numpy as np
 
 # --- 音声録音の基本設定 ---
 FORMAT = pyaudio.paInt16  # 16ビットPCM
@@ -14,14 +15,13 @@ SAMPLE_RATE = 24000       # サンプリングレート
 BUFFER_SIZE = 1024        # 一度に読み込むデータサイズ
 
 # --- UDP設定 ---
-ESP_IP = "192.168.4.1"  # ESP32のIPアドレス
+ESP_IP = "saw-ring.local"  # ESP32のIPアドレス
 PORT = 8000         # ポート番号
-num_samples = BUFFER_SIZE // 2
+DTYPE = np.int16
+NUM_SAMPLES = BUFFER_SIZE // np.dtype(DTYPE).itemsize
+num_samples = BUFFER_SIZE // np.dtype(DTYPE).itemsize
 unpack_format = f'<{num_samples}h'
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((ESP_IP, PORT))
-print(f"Connected to {ESP_IP}:{PORT}")
 
 class AudioDataCollector:
     def __init__(self, root):
@@ -90,39 +90,82 @@ class AudioDataCollector:
         return entry 
 
     def start_collection(self):
-        if not self.is_collecting_active:
-            # オーディオストリームを開始
-            self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
-                                      input=True, frames_per_buffer=BUFFER_SIZE)
-            self.is_collecting_active = True
-            self.start_button.config(state=tk.DISABLED)
-            self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
-            # キーイベントの受付を開始
-            self.root.bind("<Alt_L>", self.on_key_press)  # 左Optionキーで録音開始
-            self.root.bind("<KeyRelease-Alt_L>", self.on_key_release)  # 左Optionキーで録音停止
-            self.root.bind("<Alt_R>", self.on_key_press)  # 右Optionキーで録音開始
-            self.root.bind("<KeyRelease-Alt_R>", self.on_key_release)  # 右Optionキーで録音停止
-            print("収集プロセスを開始しました。")
+        if self.is_collecting_active:
+            return
+        
+        self.start_button.config(state=tk.DISABLED)
+        self.status_label.config(text=f"{ESP_IP} に接続中...", fg="orange")
+
+        connect_thread = threading.Thread(target=self._connect_tcp, daemon=True)
+        connect_thread.start()
+
+
+            # # オーディオストリームを開始
+            # self.stream = self.p.open(format=FORMAT, channels=CHANNELS, rate=SAMPLE_RATE,
+            #                           input=True, frames_per_buffer=BUFFER_SIZE)
+            # self.is_collecting_active = True
+            # self.start_button.config(state=tk.DISABLED)
+            # self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
+            # # キーイベントの受付を開始
+            # self.root.bind("<Alt_L>", self.on_key_press)  # 左Optionキーで録音開始
+            # self.root.bind("<KeyRelease-Alt_L>", self.on_key_release)  # 左Optionキーで録音停止
+            # self.root.bind("<Alt_R>", self.on_key_press)  # 右Optionキーで録音開始
+            # self.root.bind("<KeyRelease-Alt_R>", self.on_key_release)  # 右Optionキーで録音停止
+            # print("収集プロセスを開始しました。")
+
+    def _connect_tcp(self):
+        """TCP接続を実行するスレッド関数"""
+        try:
+            self.client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.client.connect((ESP_IP, PORT))
+            self.client.settimeout(3.0) # タイムアウト設定
+            print(f"Connected to {ESP_IP}:{PORT}")
+
+            # 接続成功時のUI更新 (メインスレッドで実行)
+            self.root.after(0, self._on_connection_success)
+            
+        except Exception as e:
+            print(f"接続エラー: {e}")
+            self.root.after(0, self.start_button.config, {"state": tk.NORMAL})
+            self.root.after(0, self.status_label.config, {"text": f"接続失敗: {e}", "fg": "red"})
+
+    def _on_connection_success(self):
+        """接続成功時にUIを更新し、キーバインドを有効化"""
+        self.is_collecting_active = True
+        self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
+        # キーイベントの受付を開始
+        self.root.bind("<Alt_L>", self.on_key_press)
+        self.root.bind("<KeyRelease-Alt_L>", self.on_key_release)
+        self.root.bind("<Alt_R>", self.on_key_press)
+        self.root.bind("<KeyRelease-Alt_R>", self.on_key_release)
+        print("収集プロセスを開始しました。")
 
     def receive_pcm_data(self):
-        self.buffer = b''
+        self.buffer = b'' # 受信バッファをクリア
 
         while self.is_recording:
             try:
                 # TCPデータを受信
-                raw_data = client.recv(BUFFER_SIZE)
+                raw_data = self.client.recv(BUFFER_SIZE)
                 if not raw_data:
-                    raise ConnectionError("TCP connection lost.")
+                    # 接続が正常に閉じられた
+                    print("TCP接続が閉じられました。")
+                    self.is_recording = False
+                    self.root.after(0, self.status_label.config, {"text": "接続が閉じられました。", "fg": "red"})
+                    break
+                
                 # バッファにデータを追加
                 self.buffer += raw_data
-                # print(f"Received {len(raw_data)} bytes")
-            except ConnectionError as e:
-                print(f"接続エラー: {e}")
-                self.status_label.config(text="接続が切断されました。再接続を試みています...", fg="red")
-                self.reconnect()
+                
+            except socket.timeout:
+                print("ソケットタイムアウト")
+                continue # タイムアウトは無視してループを続ける
             except Exception as e:
-                print(f"エラーが発生しました: {e}")
-                raise
+                if self.is_recording: # ユーザーが停止した場合以外のエラー
+                    print(f"受信エラー: {e}")
+                    self.root.after(0, self.status_label.config, {"text": "接続エラー発生。", "fg": "red"})
+                break
+        print("受信スレッド終了。")
 
     def reconnect(self):
         global client
@@ -144,9 +187,10 @@ class AudioDataCollector:
     def on_key_press(self, event):
         if not self.is_recording:
             self.is_recording = True
-            self.audio_frames = [] # バッファをリセット
             self.buffer = b''  # UDPバッファをリセット
             self.status_label.config(text="収集中...", fg="red")
+
+            self.start_time = time.time() 
 
             # UDPデータ受信スレッドを開始
             self.recording_thread = threading.Thread(target=self.receive_pcm_data)
@@ -159,6 +203,8 @@ class AudioDataCollector:
             print("録音停止！")
             self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
 
+            self.actual_duration = time.time() - self.start_time
+
             # スレッドの終了を待機
             if self.recording_thread.is_alive():
                 self.recording_thread.join()
@@ -168,12 +214,12 @@ class AudioDataCollector:
 
             time.sleep(0.5)
 
-    def record_audio(self):
-        while self.is_recording:
-            data = self.stream.read(BUFFER_SIZE)
-            self.audio_frames.append(data)
-        # 録音が終了したら、メインスレッドでファイル保存を呼び出す
-        self.root.after(0, self.save_audio_file)
+    # def record_audio(self):
+    #     while self.is_recording:
+    #         data = self.stream.read(BUFFER_SIZE)
+    #         self.audio_frames.append(data)
+    #     # 録音が終了したら、メインスレッドでファイル保存を呼び出す
+    #     self.root.after(0, self.save_audio_file)
 
     def save_audio_file(self):
         label = self.label_entry.get().strip()
@@ -195,6 +241,27 @@ class AudioDataCollector:
         os.makedirs(save_dir, exist_ok=True)  # ディレクトリが存在しない場合は作成
         
         filename = os.path.join(save_dir, f"{label}_{count}.wav")
+
+        total_bytes = len(self.audio_buffer)
+
+        # 1秒あたりのバイト数 = サンプリングレート * (ビット数/8) * チャンネル数
+        bytes_per_sec = SAMPLE_RATE * (16 / 8) * CHANNELS 
+        duration = total_bytes / bytes_per_sec
+
+        # パケットロス率の計算: (実時間 - データ時間) / 実時間
+        if self.actual_duration > 0:
+            loss_rate = (1 - (duration / self.actual_duration)) * 100
+        else:
+            loss_rate = 0
+
+        print(f"--------------------------------------------------")
+        print(f"【保存データ診断】")
+        print(f"  - 受信データ総量 : {total_bytes} bytes")
+        print(f"  - 1秒に必要な量  : {int(bytes_per_sec)} bytes")
+        print(f"  - 録音時間 : {duration:.3f} 秒")
+        print(f"  - 実際の録音時間       : {self.actual_duration:.3f} 秒")
+        print(f"  - データ損失率(Loss)   : {loss_rate:.1f} %")
+        print(f"--------------------------------------------------")
         
         # WAVファイルとして保存
         with wave.open(filename, 'wb') as wf:

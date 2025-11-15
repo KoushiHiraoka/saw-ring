@@ -21,7 +21,7 @@ CHARACTERISTIC_UUID = "13b73498-101b-4f22-aa2b-a72c6710e54f"
 
 # SETTINGS
 BUFFER_SIZE = 1024  # 処理単位となるデータサイズ (バイト)
-SAMPLE_RATE = 24000
+SAMPLE_RATE = 16000
 DTYPE = np.int16
 NUM_SAMPLES = BUFFER_SIZE // np.dtype(DTYPE).itemsize
 
@@ -64,7 +64,13 @@ class DataWorker(QObject):
     async def main_ble_loop(self):
         """BLEデバイスのスキャン、接続、データ受信待機を行うメインループ"""
         self.status_update.emit("状態: <font color='blue'><b>BLEデバイスを検索中...</b></font>")
-        device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=10.0)
+        # device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=10.0)
+        devices = await BleakScanner.discover(timeout=5.0)
+        device = None
+        for d in devices:
+            if d.name == DEVICE_NAME:
+                device = d
+                break
         
         if not device:
             self.connection_failed.emit(f"デバイス '{DEVICE_NAME}' が見つかりません。")
@@ -118,6 +124,8 @@ class MainWindow(QMainWindow):
         self._setup_ui()
         self._init_plots()
 
+        self.spectro_window = SpectrogramWindow()  # サブウィンドウを事前に作成
+        self.spectro_window.hide()
         self.worker = None
         self.thread = None
 
@@ -238,8 +246,8 @@ class MainWindow(QMainWindow):
     def start_plotting(self):
         if self.thread and self.thread.isRunning():
             return
-        # 新しいサブウィンドウを開く
-        self.spectro_window = SpectrogramWindow()
+        # # 新しいサブウィンドウを開く
+        # self.spectro_window = SpectrogramWindow()
         self.spectro_window.show()
         
         self.data_buffer.clear()
@@ -269,11 +277,6 @@ class MainWindow(QMainWindow):
         if self.thread:
             self.thread.quit()
             self.thread.wait()
-
-        # サブウィンドウも閉じる
-        if self.spectro_window:
-            self.spectro_window.close()
-            self.spectro_window = None
 
         self.thread = None
         self.worker = None
@@ -363,6 +366,8 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         self.stop_plotting()
+        if self.spectro_window:
+            self.spectro_window.close()
         event.accept()
 
 class SpectrogramWindow(QWidget):
