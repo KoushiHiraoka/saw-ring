@@ -1,29 +1,34 @@
 import sys
 import socket
 import numpy as np
-from scipy import fft
+import librosa
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout,
     QHBoxLayout, QPushButton, QLabel
 )
-from PyQt6.QtCore import QThread, pyqtSignal, QObject
-import pyqtgraph as pg
-import time
-
 from PyQt6.QtCore import QThread, pyqtSignal, QObject, QTimer
 import pyqtgraph as pg
 from collections import deque
+import time
 
 # --- 基本設定 ---
-ESP_IP = "192.168.4.1"
+# TCP接続設定
+ESP_IP = "saw-ring.local" 
 PORT = 8000
-BUFFER_SIZE = 1024 * 2 # FFTの分解能を上げるため、バッファを少し増やす
-SAMPLE_RATE = 24000
+
+# 音声データ設定
+BUFFER_SIZE = 1024 * 2 
+SAMPLE_RATE = 24000 # WiFiだと帯域に余裕があるので24kでOK
 DTYPE = np.int16
-# バッファサイズからサンプル数を計算
 NUM_SAMPLES = BUFFER_SIZE // np.dtype(DTYPE).itemsize
 
-# --- データ受信を専門に行うWorkerクラス ---
+# スペクトログラムの設定 (BLEコードと同じ)
+N_FFT = 512
+HOP_LENGTH = 128
+N_MELS = 64
+SPECTRO_TIME_STEPS = 100
+
+# --- データ受信を専門に行うWorkerクラス (TCP版) ---
 class DataWorker(QObject):
     data_ready = pyqtSignal(np.ndarray)
     connection_failed = pyqtSignal(str)
@@ -39,7 +44,10 @@ class DataWorker(QObject):
         """TCP接続とデータ受信ループ"""
         buffer = b''
         try:
+            # 接続タイムアウトを少し長めに設定
             self.client = socket.create_connection((ESP_IP, PORT), timeout=5)
+            # Nagleアルゴリズムを無効化（遅延対策）
+            self.client.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
             self.connection_success.emit()
         except Exception as e:
             self.connection_failed.emit(f"接続失敗: {e}")
@@ -47,6 +55,7 @@ class DataWorker(QObject):
 
         while self._is_running:
             try:
+                # データ受信
                 raw_data = self.client.recv(BUFFER_SIZE)
                 if not raw_data:
                     self.connection_lost.emit("接続が相手方から切断されました。")
@@ -54,24 +63,20 @@ class DataWorker(QObject):
                 
                 buffer += raw_data
                 
-                # 厳密にBUFFER_SIZEごとに処理
+                # BUFFER_SIZEごとに切り出して処理
                 while len(buffer) >= BUFFER_SIZE:
-                    loop_start = time.perf_counter()
-
                     data_to_process = buffer[:BUFFER_SIZE]
                     buffer = buffer[BUFFER_SIZE:]
                     
                     pcm_data = np.frombuffer(data_to_process, dtype=DTYPE)
+                    
                     if pcm_data.size > 0:
+                        # -1.0 ~ 1.0 に正規化
                         normalized_data = pcm_data / 32768.0
                         self.data_ready.emit(normalized_data)
-                    
-                    loop_end = time.perf_counter()
-                    elapsed = loop_end - loop_start
-                    print(f"データ受信速度: {elapsed*1000:.3f} ms")
 
             except socket.timeout:
-                continue # タイムアウトは許容
+                continue 
             except Exception as e:
                 self.connection_lost.emit(f"受信エラー: {e}")
                 break
@@ -83,50 +88,52 @@ class DataWorker(QObject):
     def stop(self):
         self._is_running = False
 
+
 # --- メインウィンドウクラス ---
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("リアルタイム波形・周波数解析")
+        self.setWindowTitle("Real-time Waveform and Spectrogram (TCP)")
         self.setGeometry(100, 100, 1000, 600)
 
-        # 表示モードの状態を管理 ('waveform' or 'fft')
         self.display_mode = 'waveform'
         
+        # スペクトログラム用データバッファ初期化
+        self.spectro_data = np.full((N_MELS, SPECTRO_TIME_STEPS), -80.0)
+
         self._setup_ui()
-        self._init_plots() # プロットの初期化を分離
+        self._init_plots()
+
+        # サブウィンドウの作成
+        self.spectro_window = SpectrogramWindow()
+        self.spectro_window.hide()
 
         self.worker = None
         self.thread = None
-
-        # dequeは高速に要素を追加・削除できるリストのようなもの
         self.data_buffer = deque()
 
-        # 描画更新用のタイマー
+        # 描画更新用タイマー
         self.plot_timer = QTimer(self)
-        self.plot_timer.setInterval(16) # 約30fps (1000ms / 30)
+        self.plot_timer.setInterval(16)  # 約60fps
         self.plot_timer.timeout.connect(self.triggered_update_plot)
 
     def _setup_ui(self):
-        """UIウィジェットの作成とレイアウト設定"""
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         main_layout = QVBoxLayout(central_widget)
 
-        # プロットウィジェット
         pg.setConfigOptions(antialias=True)
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground('w')
         main_layout.addWidget(self.plot_widget, stretch=1)
 
-        # 操作パネル
         control_panel = QWidget()
         control_layout = QHBoxLayout(control_panel)
         control_layout.setContentsMargins(0, 5, 0, 0)
         
-        self.start_button = QPushButton("📈 接続開始")
-        self.stop_button = QPushButton("⏹️ 切断")
-        self.toggle_button = QPushButton("📊 周波数解析へ (FFT)")
+        self.start_button = QPushButton("接続開始")
+        self.stop_button = QPushButton("切断")
+        self.toggle_button = QPushButton("ヒートマップ")
         self.stop_button.setEnabled(False)
         self.toggle_button.setEnabled(False)
         
@@ -145,38 +152,34 @@ class MainWindow(QMainWindow):
         self.toggle_button.clicked.connect(self.toggle_display_mode)
 
     def _init_plots(self):
-        """波形とFFTのプロットアイテムを初期化"""
-        # 波形プロット用データ
+        # 波形プロット用
         self.plot_data_size = NUM_SAMPLES * 10
         self.y_data = np.zeros(self.plot_data_size)
-        self.waveform_pen = pg.mkPen(color=(0, 120, 215), width=8)
-        self.waveform_plot_item = self.plot_widget.plot(self.y_data, pen=self.waveform_pen, name="Waveform")
-
-        # FFTプロット用データ
-        # rfftを使うので、データ点数は N/2 + 1
-        self.fft_freqs = fft.rfftfreq(NUM_SAMPLES, 1 / SAMPLE_RATE)
-        self.fft_power = np.zeros(len(self.fft_freqs))
-        self.fft_pen = pg.mkPen(color=(215, 60, 0), width=2)
-        self.fft_plot_item = self.plot_widget.plot(self.fft_freqs, self.fft_power, pen=self.fft_pen, name="FFT")
+        self.waveform_pen = pg.mkPen(color=(0, 120, 215), width=2)
+        self.waveform_plot_item = self.plot_widget.plot(self.y_data, pen=self.waveform_pen)
         
-        # 最初はFFTプロットを非表示にする
-        self.fft_plot_item.hide()
-        # 初期表示を波形モードに設定
+        # スペクトログラム用 (ImageItem)
+        self.image_item = pg.ImageItem()
+        self.plot_widget.addItem(self.image_item)
+        cmap = pg.colormap.get('viridis')
+        self.image_item.setLookupTable(cmap.getLookupTable())
+        self.image_item.setLevels([-60, 0])        
+        self.image_item.setImage(self.spectro_data.T)
+
+        self.image_item.hide()
         self._setup_waveform_view()
 
     def toggle_display_mode(self):
-        """表示モードを切り替える"""
         if self.display_mode == 'waveform':
-            self.display_mode = 'fft'
-            self.toggle_button.setText("📉 波形表示へ")
-            self._setup_fft_view()
+            self.display_mode = 'spectrogram'
+            self.toggle_button.setText("波形表示へ")
+            self._setup_spectrogram_view()
         else:
             self.display_mode = 'waveform'
-            self.toggle_button.setText("📊 周波数解析へ (FFT)")
+            self.toggle_button.setText("ヒートマップへ")
             self._setup_waveform_view()
 
     def _setup_waveform_view(self):
-        """波形表示モードの見た目を設定"""
         self.plot_widget.setTitle("リアルタイム波形")
         self.plot_widget.setLabel('left', 'Amplitude')
         self.plot_widget.setLabel('bottom', 'Time (Samples)')
@@ -184,50 +187,50 @@ class MainWindow(QMainWindow):
         self.plot_widget.setXRange(0, self.plot_data_size)
         self.plot_widget.setLogMode(x=False, y=False)
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
-        
         self.waveform_plot_item.show()
-        self.fft_plot_item.hide()
+        self.image_item.hide()
 
-    def _setup_fft_view(self):
-        """FFT表示モードの見た目を設定"""
-        self.plot_widget.setTitle("リアルタイム周波数解析 (FFT)")
-        self.plot_widget.setLabel('left', 'Power (Magnitude)')
-        self.plot_widget.setLabel('bottom', 'Frequency (Hz)')
-        # X軸はナイキスト周波数まで
-        self.plot_widget.setXRange(0, SAMPLE_RATE / 2)
-        # Y軸の範囲はデータの様子を見て調整
-        self.plot_widget.setYRange(0, 30) 
-        self.plot_widget.setLogMode(x=False, y=False) # 必要に応じて y=True にすると見やすい
-        self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
+    def _setup_spectrogram_view(self):
+        self.plot_widget.setTitle("ヒートマップ")
+        self.plot_widget.setLabel('left', 'Mel Bins')
+        self.plot_widget.setLabel('bottom', 'Time (Frames)')
         
+        self.image_item.setRect(0, 0, SPECTRO_TIME_STEPS, N_MELS)
+        self.plot_widget.setXRange(0, SPECTRO_TIME_STEPS)
+        self.plot_widget.setYRange(0, N_MELS)
+        self.plot_widget.showGrid(x=False, y=False)
+
         self.waveform_plot_item.hide()
-        self.fft_plot_item.show()
+        self.image_item.show()
 
     def start_plotting(self):
-        """描画・通信開始処理"""
-        if self.thread is not None and self.thread.isRunning():
+        if self.thread and self.thread.isRunning():
             return
         
+        # サブウィンドウを表示
+        self.spectro_window.show()
+        
+        self.data_buffer.clear()
         self.thread = QThread()
         self.worker = DataWorker()
         self.worker.moveToThread(self.thread)
 
-        # self.worker.data_ready.connect(self.update_plot)
         self.worker.data_ready.connect(self.queue_data)
         self.worker.connection_success.connect(self._on_connection_success)
         self.worker.connection_failed.connect(self._on_connection_failed)
         self.worker.connection_lost.connect(self._on_connection_lost)
         
         self.thread.started.connect(self.worker.run)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.thread.finished.connect(self.worker.deleteLater)
         self.thread.start()
+
         self.plot_timer.start()
-        
         self.start_button.setEnabled(False)
         self.status_label.setText("状態: <font color='orange'><b>接続中...</b></font>")
 
     def stop_plotting(self):
         self.plot_timer.stop()
-        """描画・通信停止処理"""
         if self.worker:
             self.worker.stop()
         if self.thread:
@@ -245,93 +248,51 @@ class MainWindow(QMainWindow):
     def queue_data(self, new_data):
         self.data_buffer.append(new_data)
 
-    def update_plot(self, new_data):
-        """Workerからデータを受け取り、現在のモードに応じてプロットを更新"""
-        update_start = time.perf_counter()
-
-        if self.display_mode == 'waveform':
-            self.y_data = np.roll(self.y_data, -NUM_SAMPLES)
-            self.y_data[-NUM_SAMPLES:] = new_data # 未処理のデータをまず連結CD
-            display_data = self.y_data
-
-            # 処理後のデータをプロットにセットする
-            self.waveform_plot_item.setData(display_data)
-            update_end = time.perf_counter()
-            elapsed_update = update_end - update_start
-            
-            print(f"描画更新時間: {elapsed_update*1000:.2f} ms")
-
-        else:
-            # FFTを計算して更新
-            processed_data = new_data - np.mean(new_data)
-            # ハニング窓を適用してスペクトル漏れを軽減
-            window = np.hanning(len(processed_data))
-            fft_result = fft.rfft(processed_data * window)
-            # パワースペクトル（振幅）を計算
-            self.fft_power = np.abs(fft_result)
-            self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
-
     def triggered_update_plot(self):
-        """
-        ★ QTimerによって呼び出され、バッファのデータをまとめて描画する
-        """
-
-        update_start = time.perf_counter()
-
+        """QTimerから呼ばれる描画更新処理"""
         if not self.data_buffer:
-            return # バッファにデータがなければ何もしない
+            return
 
-        # バッファに溜まっているデータを全て取り出す
-        # 今回は最新のデータ1つだけで更新するシンプルな例
-        # 連続性を重視する場合は、溜まったデータを全て処理するループをここに書く
         data_to_plot = self.data_buffer.popleft()
-        # バッファを空にする場合は self.data_buffer.clear() でも良い
+
+        # サブウィンドウにもデータを送る
+        if self.spectro_window:
+            self.spectro_window.update_plot(data_to_plot)
 
         if self.display_mode == 'waveform':
             self.y_data[:-NUM_SAMPLES] = self.y_data[NUM_SAMPLES:]
             self.y_data[-NUM_SAMPLES:] = data_to_plot
             self.waveform_plot_item.setData(self.y_data)
-            update_endd = time.perf_counter()
-            elapsed_update = update_endd - update_start
-
-            print(f"描画更新時間: {elapsed_update*1000:.3f} ms")
         else:
-            processed_data = data_to_plot - np.mean(data_to_plot)
-            window = np.hanning(len(processed_data))
-            fft_result = fft.rfft(processed_data * window)
-            self.fft_power = np.abs(fft_result)
-            self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
-    
-        # while self.data_buffer:
-        #     new_data = self.data_buffer.popleft()
+            # librosaでメルスペクトログラム計算
+            S = librosa.feature.melspectrogram(
+                y=data_to_plot, 
+                sr=SAMPLE_RATE, 
+                n_fft=N_FFT, 
+                hop_length=HOP_LENGTH, 
+                n_mels=N_MELS
+            )
+            S_db = librosa.power_to_db(S, ref=1.0)
 
-        #     # 波形表示用のデータ配列(self.y_data)を更新
-        #     if self.display_mode == 'waveform':
-        #         self.y_data[:-NUM_SAMPLES] = self.y_data[NUM_SAMPLES:]
-        #         self.y_data[-NUM_SAMPLES:] = new_data
+            num_new_frames = S_db.shape[1]
+            if num_new_frames == 0:
+                return
+
+            if num_new_frames > SPECTRO_TIME_STEPS:
+                S_db = S_db[:, -SPECTRO_TIME_STEPS:]
+                num_new_frames = SPECTRO_TIME_STEPS
+
+            self.spectro_data = np.roll(self.spectro_data, -num_new_frames, axis=1)
+            self.spectro_data[:, -num_new_frames:] = S_db
             
-        #     # FFT表示用のデータも更新しておく（表示されていなくても計算だけする）
-        #     # こうすることで、モード切替時に最新のFFTが表示される
-        #     else:
-        #         # この部分は、実際にFFT表示モードの時だけ計算する方がより効率的
-        #         # しかし、計算負荷は低いのでこのままでも問題ないことが多い
-        #         processed_data = new_data - np.mean(new_data)
-        #         window = np.hanning(len(processed_data))
-        #         fft_result = fft.rfft(processed_data * window)
-        #         self.fft_power = np.abs(fft_result)
+            self.image_item.setImage(self.spectro_data.T, autoLevels=False)
 
-        # # --- 描画処理はループの外で、最後に一回だけ！ ---
-        # if self.display_mode == 'waveform':
-        #     self.waveform_plot_item.setData(self.y_data)
-        # else:
-        #     self.fft_plot_item.setData(self.fft_freqs, self.fft_power)
-    
-    # --- 接続状態に関するスロット ---
+    # --- 接続状態用スロット ---
     def _on_connection_success(self):
         self.stop_button.setEnabled(True)
         self.toggle_button.setEnabled(True)
         self.status_label.setText("状態: <font color='green'><b>接続成功</b></font>")
-        
+    
     def _on_connection_failed(self, message):
         self.status_label.setText(f"状態: <font color='red'><b>{message}</b></font>")
         self.start_button.setEnabled(True)
@@ -341,11 +302,72 @@ class MainWindow(QMainWindow):
         self.stop_plotting()
 
     def closeEvent(self, event):
-        """ウィンドウが閉じられたときの処理"""
         self.stop_plotting()
+        if self.spectro_window:
+            self.spectro_window.close()
         event.accept()
 
-# --- アプリケーションの実行 ---
+
+# --- サブウィンドウ（ヒートマップ専用）クラス ---
+class SpectrogramWindow(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("ヒートマップ (Sub Window)")
+        self.setGeometry(110, 110, 800, 400) 
+
+        self.spectro_data = np.full((N_MELS, SPECTRO_TIME_STEPS), -60.0)
+
+        main_layout = QVBoxLayout(self)
+        pg.setConfigOptions(antialias=True)
+        
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground('w')
+        main_layout.addWidget(self.plot_widget)
+        
+        self.image_item = pg.ImageItem()
+        self.plot_widget.addItem(self.image_item)
+        cmap = pg.colormap.get('viridis')
+        self.image_item.setLookupTable(cmap.getLookupTable())
+        
+        self.image_item.setLevels([-30, 0]) 
+        self.image_item.setImage(self.spectro_data.T)
+        self._setup_spectrogram_view()
+
+    def _setup_spectrogram_view(self):
+        self.plot_widget.setTitle("ヒートマップ")
+        self.plot_widget.setLabel('left', 'Mel Bins')
+        self.plot_widget.setLabel('bottom', 'Time (Frames)')
+        
+        self.image_item.setRect(0, 0, SPECTRO_TIME_STEPS, N_MELS)
+        self.plot_widget.setXRange(0, SPECTRO_TIME_STEPS)
+        self.plot_widget.setYRange(0, N_MELS)
+        self.plot_widget.showGrid(x=False, y=False)
+
+    def update_plot(self, data_to_plot: np.ndarray):
+        try:
+            S = librosa.feature.melspectrogram(
+                y=data_to_plot, 
+                sr=SAMPLE_RATE, 
+                n_fft=N_FFT, 
+                hop_length=HOP_LENGTH, 
+                n_mels=N_MELS
+            )
+            S_db = librosa.power_to_db(S, ref=1.0) 
+            
+            num_new_frames = S_db.shape[1]
+            if num_new_frames == 0:
+                return
+            if num_new_frames > SPECTRO_TIME_STEPS:
+                S_db = S_db[:, -SPECTRO_TIME_STEPS:]
+                num_new_frames = SPECTRO_TIME_STEPS
+
+            self.spectro_data = np.roll(self.spectro_data, -num_new_frames, axis=1)
+            self.spectro_data[:, -num_new_frames:] = S_db
+            self.image_item.setImage(self.spectro_data.T, autoLevels=False)
+        except Exception as e:
+            print(f"サブスペクトログラム更新エラー: {e}")
+
+
 if __name__ == '__main__':
     app = QApplication(sys.argv)
     window = MainWindow()
