@@ -15,6 +15,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 import os
 from utils import SimpleCNN, extract_pcen
+import pyautogui
 
 # --- 基本設定 ---
 # TCP接続設定
@@ -35,7 +36,7 @@ N_MELS = 128
 FIXED_WIDTH = 188
 SAMPLE_SIZE_FOR_INFERENCE = int(SAMPLE_RATE * 2)
 
-INFERENCE_INTERVAL = 100  # 350msごとに推論
+INFERENCE_INTERVAL = 300  # 350msごとに推論
 CONFIDENCE_THRESHOLD = 0.60
 LABELS = ['double_tap', 'nail_tap','none', 'swipe', 'tap', ]
 COOLDOWN_TIME = 3.0
@@ -375,16 +376,30 @@ class MainWindow(QMainWindow):
         if label_name == LABELS[2]: # Noiseクラスならアクションなし
             self._update_gesture_display(f"others ({confidence * 100:.2f}%)", color="#000000")
             self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>{label_name}</b></font>")
+        elif label_name == LABELS[0]:
+            if confidence >= 0.90:
+                self.last_action_time = current_time
+                self.last_recognized_gesture = label_name
+                self.last_confidence = confidence
+                self._update_gesture_display(f"{label_name} ({confidence * 100:.2f}%)", color="#000000")
+                self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>{label_name}</b></font>")
+                print(f"[ACTION] {label_name} -> {confidence * 100:.2f}% ")
+                pyautogui.press('right')
+            else:
+                self._update_gesture_display(f"others ({confidence * 100:.2f}%)", color="#000000")
+                self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>{label_name}</b></font>")
+                
 
-        if confidence > CONFIDENCE_THRESHOLD and label_name != LABELS[2]:
-            if label_name == LABELS[0]:
-                label_name = "ダブルタップ"
-            elif label_name == LABELS[1]:
-                label_name = "タップ"
+        if confidence > CONFIDENCE_THRESHOLD and label_name != LABELS[2] and label_name != LABELS[0]:
+            # if label_name == LABELS[0]:
+            #     label_name = "ダブルタップ"
+            if label_name == LABELS[1]:
+                label_name = "タップ."
             elif label_name == LABELS[3]:
                 label_name = "スワイプ"
             elif label_name == LABELS[4]:
                 label_name = "タップ"
+        
             
             self.last_action_time = current_time
             self.last_recognized_gesture = label_name
