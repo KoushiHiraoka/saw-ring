@@ -10,6 +10,11 @@ from PyQt6.QtCore import QThread, pyqtSignal, QObject, QTimer
 import pyqtgraph as pg
 from collections import deque
 import time
+import torch
+import torch.nn as nn
+from torch.nn import functional as F
+import os
+from utils import SimpleCNN, extract_pcen
 
 # --- 基本設定 ---
 # TCP接続設定
@@ -21,12 +26,20 @@ BUFFER_SIZE = 1024 * 2
 SAMPLE_RATE = 24000 # WiFiだと帯域に余裕があるので24kでOK
 DTYPE = np.int16
 NUM_SAMPLES = BUFFER_SIZE // np.dtype(DTYPE).itemsize
+SPECTRO_TIME_STEPS = 100
 
 # スペクトログラムの設定 (BLEコードと同じ)
-N_FFT = 512
-HOP_LENGTH = 128
-N_MELS = 64
-SPECTRO_TIME_STEPS = 100
+N_FFT = 1024
+HOP_LENGTH = 256
+N_MELS = 128
+FIXED_WIDTH = 188
+SAMPLE_SIZE_FOR_INFERENCE = int(SAMPLE_RATE * 2)
+
+INFERENCE_INTERVAL = 100  # 350msごとに推論
+CONFIDENCE_THRESHOLD = 0.60
+LABELS = ['double_tap', 'nail_tap','none', 'swipe', 'tap', ]
+COOLDOWN_TIME = 3.0
+MODEL_PATH = "../controller/cnn_model_weights_update.pth"
 
 # --- データ受信を専門に行うWorkerクラス (TCP版) ---
 class DataWorker(QObject):
@@ -100,6 +113,16 @@ class MainWindow(QMainWindow):
         
         # スペクトログラム用データバッファ初期化
         self.spectro_data = np.full((N_MELS, SPECTRO_TIME_STEPS), -80.0)
+        self.last_action_time = 0
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = SimpleCNN(num_classes=len(LABELS)).to(self.device)
+        self.model.load_state_dict(torch.load(MODEL_PATH, map_location=self.device))
+        self.model.eval()
+
+        self.current_gesture_status = "認識: N/A (接続前)"
+        self.last_recognized_gesture = "None"
+
+        self.full_audio_buffer = deque(np.zeros(SAMPLE_SIZE_FOR_INFERENCE, dtype=np.float32), maxlen=SAMPLE_SIZE_FOR_INFERENCE)
 
         self._setup_ui()
         self._init_plots()
@@ -116,6 +139,10 @@ class MainWindow(QMainWindow):
         self.plot_timer = QTimer(self)
         self.plot_timer.setInterval(16)  # 約60fps
         self.plot_timer.timeout.connect(self.triggered_update_plot)
+
+        self.inference_timer = QTimer(self)
+        self.inference_timer.setInterval(INFERENCE_INTERVAL)
+        self.inference_timer.timeout.connect(self._run_inference)
 
     def _setup_ui(self):
         central_widget = QWidget()
@@ -152,6 +179,11 @@ class MainWindow(QMainWindow):
         self.toggle_button.clicked.connect(self.toggle_display_mode)
 
     def _init_plots(self):
+        self.gesture_label = pg.TextItem(
+            html=f'<div style="text-align: right;"><span style="color: #0078D4; font-size: 50pt;">{self.current_gesture_status}</span></div>', 
+            anchor=(1, 0) # 右上端にアンカーを設定
+        )
+        self.plot_widget.addItem(self.gesture_label)
         # 波形プロット用
         self.plot_data_size = NUM_SAMPLES * 10
         self.y_data = np.zeros(self.plot_data_size)
@@ -189,6 +221,8 @@ class MainWindow(QMainWindow):
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
         self.waveform_plot_item.show()
         self.image_item.hide()
+        self.gesture_label.setPos(self.plot_data_size, 1.1) 
+        self.gesture_label.show()
 
     def _setup_spectrogram_view(self):
         self.plot_widget.setTitle("ヒートマップ")
@@ -226,11 +260,13 @@ class MainWindow(QMainWindow):
         self.thread.start()
 
         self.plot_timer.start()
+        self.inference_timer.start()
         self.start_button.setEnabled(False)
         self.status_label.setText("状態: <font color='orange'><b>接続中...</b></font>")
 
     def stop_plotting(self):
         self.plot_timer.stop()
+        self.inference_timer.stop()
         if self.worker:
             self.worker.stop()
         if self.thread:
@@ -247,6 +283,18 @@ class MainWindow(QMainWindow):
 
     def queue_data(self, new_data):
         self.data_buffer.append(new_data)
+        self.full_audio_buffer.extend(new_data)
+    
+    def _update_gesture_display(self, text, color='#0078D4'):
+        """ジェスチャー認識結果を画面上部のラベルに反映させる"""
+        html_content = f'<div style="text-align: right;"><span style="color: {color}; font-size: 50pt; font-weight: bold;">{text}</span></div>'
+        self.gesture_label.setHtml(html_content)
+        
+        # UIがヒートマップと波形どちらのモードかによってラベル位置を調整
+        if self.display_mode == 'waveform':
+            self.gesture_label.setPos(self.plot_data_size, 1.1)
+        else:
+            self.gesture_label.setPos(SPECTRO_TIME_STEPS, N_MELS)
 
     def triggered_update_plot(self):
         """QTimerから呼ばれる描画更新処理"""
@@ -286,6 +334,64 @@ class MainWindow(QMainWindow):
             self.spectro_data[:, -num_new_frames:] = S_db
             
             self.image_item.setImage(self.spectro_data.T, autoLevels=False)
+    def _run_inference(self):
+        """推論タイマーから呼ばれるリアルタイム判定処理"""
+        current_time = time.time()
+        # クールダウン中なら何もしない (UIは更新する)
+        if current_time - self.last_action_time < COOLDOWN_TIME:
+            self._update_gesture_display(f"{self.last_recognized_gesture} ({self.last_confidence * 100:.2f}%)", color="#000000")
+            self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>HOLDING!</b></font>")
+            return
+            
+        # 1. 特徴量抽出とTensor化
+        y_samples = np.array(self.full_audio_buffer)
+        input_tensor = extract_pcen(y_samples).to(self.device)
+        
+        # 2. 推論
+        with torch.no_grad():
+            outputs = self.model(input_tensor)
+            probs = F.softmax(outputs, dim=1).squeeze().cpu().numpy()
+            
+        # 3. 判定
+        label_idx = np.argmax(probs)
+        confidence = probs[label_idx]
+        label_name = LABELS[label_idx]
+
+        # # 4. UI反映
+        # if confidence > CONFIDENCE_THRESHOLD:
+        #     if label_name == LABELS[2]: # Noiseクラスならアクションなし
+        #         self._update_gesture_display(f"noise ({confidence:.2f})", color='#000000')
+        #         return
+                
+        #     # アクション実行（実際はキー操作、今回はデモ表示のみ）
+        #     self.last_action_time = time.time() # クールダウン開始
+        #     self._update_gesture_display(f"ジェスチャー: {label_name}", color='#FF0000')
+        #     self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>{label_name}</b></font>")
+        #     print(f"[ACTION] {label_name} -> {confidence:.2f}")
+        #     self.last_recognized_gesture = label_name
+
+        # else:
+            # 確信度が低い場合は、そのまま表示
+        if label_name == LABELS[2]: # Noiseクラスならアクションなし
+            self._update_gesture_display(f"others ({confidence * 100:.2f}%)", color="#000000")
+            self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>{label_name}</b></font>")
+
+        if confidence > CONFIDENCE_THRESHOLD and label_name != LABELS[2]:
+            if label_name == LABELS[0]:
+                label_name = "ダブルタップ"
+            elif label_name == LABELS[1]:
+                label_name = "タップ"
+            elif label_name == LABELS[3]:
+                label_name = "スワイプ"
+            elif label_name == LABELS[4]:
+                label_name = "タップ"
+            
+            self.last_action_time = current_time
+            self.last_recognized_gesture = label_name
+            self.last_confidence = confidence
+            self._update_gesture_display(f"{label_name} ({confidence * 100:.2f}%)", color="#000000")
+            self.status_label.setText(f"状態: 稼働中 / 認識: <font color='red'><b>{label_name}</b></font>")
+            print(f"[ACTION] {label_name} -> {confidence * 100:.2f}% ")
 
     # --- 接続状態用スロット ---
     def _on_connection_success(self):

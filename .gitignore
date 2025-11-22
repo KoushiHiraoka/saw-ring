@@ -3,3 +3,6 @@
 .venv/
 data/
 data_48k/
+*.pth
+*.pkl
+*.pyc

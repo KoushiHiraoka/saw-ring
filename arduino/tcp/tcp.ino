@@ -103,7 +103,7 @@ void setup() {
 
   WiFiManager wm;
 
-  // wm.resetSettings(); 
+  wm.resetSettings(); 
 
   bool res = wm.autoConnect("SAW-Ring-Setup");
   if(!res) {
