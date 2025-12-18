@@ -1,0 +1,15 @@
+texture
+・皮膚 skin
+・木材 wood
+・コットン fabric
+・ステンレス stainless
+・ガラス　glass
+・シリコン	silicone
+・紙　paper
+・ダンボール　cardboard
+
+person_1, hiraoka
+person_2, hatamoto
+person_3, mitsumaru
+person_4, ishibashi
+person_5, kasuga

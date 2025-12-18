@@ -36,11 +36,14 @@ N_MELS = 128
 FIXED_WIDTH = 188
 SAMPLE_SIZE_FOR_INFERENCE = int(SAMPLE_RATE * 2)
 
-INFERENCE_INTERVAL = 300  # 350msごとに推論
+INFERENCE_INTERVAL = 100  # 350msごとに推論
 CONFIDENCE_THRESHOLD = 0.60
-LABELS = ['double_tap', 'nail_tap','none', 'swipe', 'tap', ]
 COOLDOWN_TIME = 3.0
+
+LABELS = ['double_tap', 'nail_tap','none', 'swipe', 'tap', ]
 MODEL_PATH = "../controller/cnn_model_weights_update.pth"
+# LABELS = ['double_tap','none', 'swipe', 'tap', ]
+# MODEL_PATH = "../controller/cnn_weights_3_simple.pth"
 
 # --- データ受信を専門に行うWorkerクラス (TCP版) ---
 class DataWorker(QObject):
@@ -71,6 +74,7 @@ class DataWorker(QObject):
             try:
                 # データ受信
                 raw_data = self.client.recv(BUFFER_SIZE)
+                # raw_data = self.client.recv(BUFFER_SIZE * 4)
                 if not raw_data:
                     self.connection_lost.emit("接続が相手方から切断されました。")
                     break
@@ -119,6 +123,9 @@ class MainWindow(QMainWindow):
         self.model = SimpleCNN(num_classes=len(LABELS)).to(self.device)
         self.model.load_state_dict(torch.load(MODEL_PATH, map_location=self.device))
         self.model.eval()
+
+        self.overlap_size = N_FFT - HOP_LENGTH
+        self.prev_audio_main = np.zeros(self.overlap_size, dtype=np.float32)
 
         self.current_gesture_status = "認識: N/A (接続前)"
         self.last_recognized_gesture = "None"
@@ -313,13 +320,16 @@ class MainWindow(QMainWindow):
             self.y_data[-NUM_SAMPLES:] = data_to_plot
             self.waveform_plot_item.setData(self.y_data)
         else:
+            combined_y = np.concatenate((self.prev_audio_main, data_to_plot))
+            self.prev_audio_main = data_to_plot[-self.overlap_size:]
             # librosaでメルスペクトログラム計算
             S = librosa.feature.melspectrogram(
-                y=data_to_plot, 
+                y=combined_y, 
                 sr=SAMPLE_RATE, 
                 n_fft=N_FFT, 
                 hop_length=HOP_LENGTH, 
-                n_mels=N_MELS
+                n_mels=N_MELS,
+                center = False
             )
             S_db = librosa.power_to_db(S, ref=1.0)
 
@@ -399,6 +409,11 @@ class MainWindow(QMainWindow):
                 label_name = "スワイプ"
             elif label_name == LABELS[4]:
                 label_name = "タップ"
+
+            # if label_name == LABELS[2]:
+            #     label_name = "スワイプ"
+            # elif label_name == LABELS[3]:
+            #     label_name = "タップ"
         
             
             self.last_action_time = current_time
@@ -452,6 +467,10 @@ class SpectrogramWindow(QWidget):
         
         self.image_item.setLevels([-30, 0]) 
         self.image_item.setImage(self.spectro_data.T)
+
+        self.overlap_size = N_FFT - HOP_LENGTH
+        self.prev_audio_sub = np.zeros(self.overlap_size, dtype=np.float32)
+
         self._setup_spectrogram_view()
 
     def _setup_spectrogram_view(self):
@@ -466,12 +485,15 @@ class SpectrogramWindow(QWidget):
 
     def update_plot(self, data_to_plot: np.ndarray):
         try:
+            combined_y = np.concatenate((self.prev_audio_sub, data_to_plot))
+            self.prev_audio_sub = data_to_plot[-self.overlap_size:]
             S = librosa.feature.melspectrogram(
-                y=data_to_plot, 
+                y=combined_y, 
                 sr=SAMPLE_RATE, 
                 n_fft=N_FFT, 
                 hop_length=HOP_LENGTH, 
-                n_mels=N_MELS
+                n_mels=N_MELS,
+                center=False
             )
             S_db = librosa.power_to_db(S, ref=1.0) 
             

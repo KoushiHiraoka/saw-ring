@@ -6,3 +6,4 @@ data_48k/
 *.pth
 *.pkl
 *.pyc
+past_data_1/

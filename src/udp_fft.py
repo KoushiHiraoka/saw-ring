@@ -12,7 +12,7 @@ from pyqtgraph.Qt import QtCore, QtWidgets
 ESP_IP = "0.0.0.0"
 PORT = 8000
 BUFFER_SIZE = 1024
-SAMPLE_RATE = 44100
+SAMPLE_RATE = 24000
 num_samples = BUFFER_SIZE // 2
 unpack_format = f'<{num_samples}h'
 

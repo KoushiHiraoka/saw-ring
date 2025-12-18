@@ -97,6 +97,7 @@ void tcp_send_task(void *pvParameters) {
   }
 }
 
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Start SAW-Ring (Multi-Core TCP)");
