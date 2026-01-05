@@ -16,7 +16,7 @@ UDP_PORT = 8000    # Must match the port in your ESP32 code
 
 # Audio Settings
 SAMPLE_RATE = 24000
-BUFFER_SIZE = 512  # Size of the UDP packet payload (bytes)
+BUFFER_SIZE = 1024  # Size of the UDP packet payload (bytes)
 DTYPE = np.int16   # Data type sent by ESP32 (16-bit PCM)
 SPECTRO_TIME_STEPS = 100
 

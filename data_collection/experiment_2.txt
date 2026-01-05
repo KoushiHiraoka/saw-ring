@@ -1,0 +1,36 @@
+texture
+・皮膚 skin
+・木材 wood
+・ガラス　glass
+・コットン fabric
+・ステンレス stainless
+・ダンボール　cardboard
+・プラスチック plastic
+・紙　paper
+
+person_1, hiraoka
+person_2, suemoto
+person_3, henzan
+person_4, futamura
+person_5, takiguchi
+person_6, atsuchi
+person_7, kurachi
+person_8, hayashida
+person_9, kasuga
+person_10, shiojiri
+person_11, hatamoto
+person_12, mitsumaru
+person_13, ishibashi
+person_14, oyama
+person_15, takizawa
+person_16, mori
+person_17, nakayama
+person_18, hata
+person_19, kuroki
+person_20, furuta
+person_21, honda
+person_22, taninaka
+person_23, aiura
+person_24, nakao
+person_25, fukuda
+person_26, harumi
