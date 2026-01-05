@@ -9,3 +9,5 @@ scipy
 librosa
 scikit-learn==1.7.2
 bleak
+pyautogui
+torch
