@@ -8,15 +8,15 @@ import time
 import numpy as np
 from collections import deque
 
-# --- 音声録音の基本設定 ---
+# Configuration
 FORMAT = pyaudio.paInt16  # 16ビットPCM
 CHANNELS = 1              # モノラル
-SAMPLE_RATE = 24000       # サンプリングレート
-BUFFER_SIZE = 1024        # 一度に読み込むデータサイズ
+SAMPLE_RATE = 24000       
+BUFFER_SIZE = 1024        
 
-# --- UDP設定 ---
-UDP_IP = "0.0.0.0"  # 全インターフェースで受信
-PORT = 8000         # ポート番号
+# UDP設定 
+UDP_IP = "0.0.0.0"  
+PORT = 8000         
 
 class AudioDataCollector:
     def __init__(self, root):
