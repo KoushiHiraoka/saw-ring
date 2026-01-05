@@ -97,13 +97,14 @@ void tcp_send_task(void *pvParameters) {
   }
 }
 
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Start SAW-Ring (Multi-Core TCP)");
 
   WiFiManager wm;
 
-  // wm.resetSettings(); 
+  wm.resetSettings(); 
 
   bool res = wm.autoConnect("SAW-Ring-Setup");
   if(!res) {

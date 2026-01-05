@@ -208,9 +208,9 @@ class AudioDataCollector:
         
         # 保存先パス作成
         if not person:
-            save_dir = f"../data/{texture}"
+            save_dir = f"../data/experiment/{texture}"
         else:
-            save_dir = f"../data/{texture}/{person}"
+            save_dir = f"../data/experiment/{texture}/{person}"
         os.makedirs(save_dir, exist_ok=True)
         
         filename = os.path.join(save_dir, f"{label}_{count}.wav")
