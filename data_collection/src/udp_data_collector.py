@@ -5,16 +5,14 @@ import threading
 import os
 import socket
 import time
-import numpy as np
 from collections import deque
 
-# Configuration
-FORMAT = pyaudio.paInt16  # 16ビットPCM
-CHANNELS = 1              # モノラル
+# config
+FORMAT = pyaudio.paInt16
+CHANNELS = 1             
 SAMPLE_RATE = 24000       
 BUFFER_SIZE = 1024        
-
-# UDP設定 
+# UDP config
 UDP_IP = "0.0.0.0"  
 PORT = 8000         
 
