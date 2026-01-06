@@ -3,98 +3,99 @@ import pyaudio
 import wave
 import threading
 import os
-import socket
 import time
 from collections import deque
+import socket
+import re
 
-# config
+from utils import *
+
+# udp config 
 FORMAT = pyaudio.paInt16
 CHANNELS = 1             
 SAMPLE_RATE = 24000       
-BUFFER_SIZE = 1024        
-# UDP config
+BUFFER_SIZE = 1024  
+LESS_THRESHOLD = 10.0  # データ損失率閾値     
 UDP_IP = "0.0.0.0"  
-PORT = 8000         
+PORT = 8000 
+
+# mac config
+MAC_FORMAT = pyaudio.paInt16
+MAC_CHANNELS = 1
+MAC_SAMPLE_RATE = 44100 # 調べる
+MAC_CHUNK_SIZE = 1024
+
+
 
 class AudioDataCollector:
     def __init__(self, root):
         self.root = root
-        self.root.title("SAWデータ収集アプリ (UDP)")
-        # ウィンドウサイズの設定
-        width, height = 1000, 600
+        width, height = 600, 400
         dx, dy = self.centering_window(width, height)
         self.root.geometry(f"{width}x{height}+{dx}+{dy}")
 
-        # --- 状態管理用の変数 ---
-        self.is_collecting_active = False # 「収集スタート」が押されたか
-        self.is_recording = False         # Optionキーが押されているか
+        self.is_collecting_active = False 
+        self.is_recording = False
         self.socket = None
         self.receive_thread = None
 
+        # udp
         self.recorded_chunks = []
-        self.stream_buffer = deque(maxlen=200)
-        self.label_counts = {}            # ラベルごとのファイル数を記録する辞書
-        self.start_time = 0               # 録音開始時刻
-        self.actual_duration = 0          # 実際の録音時間
+        self.stream_buffer = deque(maxlen=200) 
 
-        # --- GUIウィジェットの作成 ---
-        self.texture_entry = self.entry_pair(root, "Texture", pady=(50, 10), insert="test_tex")
-        self.label_entry = self.entry_pair(root, "Gesture", pady=(0, 10), insert="swipe")
-        self.person_entry = self.entry_pair(root, "Person", pady=(0, 10), insert="person_1")
-        self.index_entry = self.entry_pair(root, "Index", pady=(0, 10), insert="1")
+        # mac
+        self.mac_stream = None
+        self.mac_recorded_chunks = []
+        self.mac_stream_buffer = deque(maxlen=int(MAC_SAMPLE_RATE / MAC_CHUNK_SIZE * 2))
 
-        # ボタン
+        self.start_time = 0
+        self.actual_duration = 0
+
         self.start_button = tk.Button(root, text="収集スタート", font=("Helvetica", 14), command=self.start_collection)
-        self.start_button.pack(pady=20)
-
+        self.start_button.pack(pady=10)
         self.reset_button = tk.Button(root, text="リセット", font=("Helvetica", 14), command=self.reset_app)
-        self.reset_button.pack(pady=5)
-
+        self.reset_button.pack(pady=10)
         self.quit_button = tk.Button(root, text="終了", font=("Helvetica", 14), command=self.quit_app)
-        self.quit_button.pack(pady=5)
+        self.quit_button.pack(pady=10)
         
         # ステータス表示
         self.status_label = tk.Label(root, text="「収集スタート」を押してください", font=("Helvetica", 14))
-        self.status_label.pack(pady=20)
+        self.status_label.pack(pady=10)
 
-        # --- PyAudioの初期化 ---
         self.p = pyaudio.PyAudio()
         self.root.protocol("WM_DELETE_WINDOW", self.quit_app)
 
     def centering_window(self, width, height):
+        """ 画面位置調整用 """
         screen_width = self.root.winfo_screenwidth()
         screen_height = self.root.winfo_screenheight()
         dx = screen_width // 2 - width // 2
         dy = screen_height // 2 - height // 2
         return dx, dy
-    
-    def entry_pair(self, parent, label_text, entry_width=30, font=("Helvetica", 18), pady=(10, 0), insert=""):
-        frame = tk.Frame(parent)
-        frame.pack(pady=pady)
-        label = tk.Label(frame, text=label_text, font=font)
-        label.pack(side=tk.LEFT)
-        entry = tk.Entry(frame, font=font, width=entry_width)
-        if insert:
-            entry.insert(0, insert)
-        entry.pack(side=tk.LEFT, padx=10)
-        return entry 
 
     def start_collection(self):
         if self.is_collecting_active:
             return
-        
         try:
-            # UDPソケットの作成とバインド
             self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 1024 * 1024 * 4)
             self.socket.bind((UDP_IP, PORT))
-            self.socket.settimeout(1.0) # タイムアウト設定（終了判定用）
+            self.socket.settimeout(1.0)
+
+            self.mac_stream = self.p.open(
+                format=MAC_FORMAT,
+                channels=MAC_CHANNELS,
+                rate=MAC_SAMPLE_RATE,
+                input=True,
+                frames_per_buffer=MAC_CHUNK_SIZE,
+                stream_callback=self.mac_audio_callback
+            )
+            self.mac_stream.start_stream()
             
             self.is_collecting_active = True
             self.start_button.config(state=tk.DISABLED)
             self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue")
             
-            # キーバインド
             self.root.bind("<Alt_L>", self.on_key_press)
             self.root.bind("<KeyRelease-Alt_L>", self.on_key_release)
             self.root.bind("<Alt_R>", self.on_key_press)
@@ -110,61 +111,60 @@ class AudioDataCollector:
             print(f"Error: {e}")
 
     def receive_pcm_data(self):
-        """常にデータを受信し続け、録音フラグがTrueの時だけバッファに溜める"""
-        print("受信ループ開始")
         while self.is_collecting_active:
             try:
-                data, addr = self.socket.recvfrom(BUFFER_SIZE * 2)
+                data, _ = self.socket.recvfrom(BUFFER_SIZE * 2)
                 self.stream_buffer.append(data)
                 if self.is_recording:
                     self.recorded_chunks.append(data)
             except socket.timeout:
-                continue # タイムアウトは無視してループ継続
+                continue
             except Exception as e:
                 print(f"受信エラー: {e}")
                 break
-        print("受信ループ終了")
+
+    def mac_audio_callback(self, in_data, frame_count, time_info, status):
+        """ Macマイク入力用コールバック """
+        if self.is_collecting_active:
+            self.mac_stream_buffer.append(in_data)
+            if self.is_recording:
+                self.mac_recorded_chunks.append(in_data)
+        return (None, pyaudio.paContinue)
 
     def on_key_press(self, event):
         if not self.is_recording and self.is_collecting_active:
             self.is_recording = True
             self.start_time = time.time()
-            pre_roll = list(self.stream_buffer)[-5:] # 直近5パケット程度
+
+            pre_roll = list(self.stream_buffer)[-5:] # 直近5パケット
             self.recorded_chunks = pre_roll
+            pre_roll_mac = list(self.mac_stream_buffer)[-5:]
+            self.mac_recorded_chunks = pre_roll_mac
+            
             self.status_label.config(text="収集中...", fg="red")
-            # print("録音開始")
 
     def on_key_release(self, event):
         if self.is_recording:
             self.is_recording = False
             self.actual_duration = time.time() - self.start_time
-            # print("録音停止")
             self.status_label.config(text="保存中...", fg="orange")
             
-            # 保存処理へ
             self.save_audio_file()
+            self.recorded_chunks = []
+            self.mac_recorded_chunks = []
             
-            # 少し待ってからステータスを戻す
-            self.root.after(800, lambda: self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue"))
+            # delay後，待機状態
+            self.root.after(2000, lambda: self.status_label.config(text="待機中: Optionキーを押して録音開始", fg="blue"))
 
     def save_audio_file(self):
-        LESS_THRESHOLD = 10.0
 
-        label = self.label_entry.get().strip() or "test"
-        person = self.person_entry.get().strip() 
-        texture = self.texture_entry.get().strip() or "test"
-
-        try:
-            initial_count = int(self.index_entry.get().strip()) - 1
-        except ValueError:
-            initial_count = 0
-
-        current_count = self.label_counts.get(label, initial_count) + 1
         full_data = b''.join(self.recorded_chunks)
-
         total_bytes = len(full_data)
+
         bytes_per_sec = SAMPLE_RATE * (16 / 8) * CHANNELS 
         duration = total_bytes / bytes_per_sec if bytes_per_sec > 0 else 0
+
+        full_data_mac = b''.join(self.mac_recorded_chunks)
 
         # データ損失率の計算 (UDPなのでパケットロスがあり得る)
         loss_rate = 0
@@ -173,7 +173,7 @@ class AudioDataCollector:
             loss_rate = max(0.0, loss_rate)
 
         print(f"--------------------------------------------------")
-        print(f"SAW-Ring Report")
+        print(f"SAW Data Report")
         print(f"  - データ上の時間 : {duration:.3f} 秒")
         print(f"  - 実際の録音時間 : {self.actual_duration:.3f} 秒")
         print(f"  - 損失率     : {loss_rate:.1f} %")
@@ -182,29 +182,42 @@ class AudioDataCollector:
         if loss_rate > LESS_THRESHOLD:
             self.status_label.config(text=f"保存中止: 損失率が高いです. やり直してください ({loss_rate:.1f}%)", fg="red")
             print(f"保存中止: 損失率が高いです ({loss_rate:.1f}%)")
-            return
-        else:
-            self.label_counts[label] = current_count
-            
-        # ディレクトリ構成: data/texture/person_X/label_N.wav
-        if not person:
-            save_dir = f"../data/experiment/{texture}"
-        else:
-            save_dir = f"../data/experiment/{texture}/person_{person}"
+        
+        # Save File
+        save_dir = f"../data_collection/data/audio"
         os.makedirs(save_dir, exist_ok=True)
-        
-        filename = os.path.join(save_dir, f"{label}_{current_count}.wav")
 
+        suffix_pat = re.compile(r".*_(\d+)\.wav$", re.IGNORECASE)
+        max_idx = 0
+        for entry in os.scandir(save_dir):
+            if not entry.is_file():
+                continue
+            m = suffix_pat.match(entry.name)
+            if not m:
+                continue
+            try:
+                max_idx = max(max_idx, int(m.group(1)))
+            except ValueError:
+                pass
         
+        filename_saw = os.path.join(save_dir, f"saw_{max_idx + 1}.wav")
+        filename_mac = os.path.join(save_dir, f"mac_{max_idx + 1}.wav")
+
         try:
-            with wave.open(filename, 'wb') as wf:
+            with wave.open(filename_saw, 'wb') as wf:
                 wf.setnchannels(CHANNELS)
                 wf.setsampwidth(self.p.get_sample_size(FORMAT))
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(full_data)
+
+            with wave.open(filename_mac, 'wb') as wf:
+                wf.setnchannels(MAC_CHANNELS)
+                wf.setsampwidth(self.p.get_sample_size(MAC_FORMAT))
+                wf.setframerate(MAC_SAMPLE_RATE)
+                wf.writeframes(full_data_mac)
             
-            self.status_label.config(text=f"保存完了: {os.path.basename(filename)}", fg="green")
-            print(f"ファイル保存: {filename}")
+            self.status_label.config(text=f"保存完了: {os.path.basename(filename_saw)}, {os.path.basename(filename_mac)}", fg="green")
+            print(f"ファイル保存: saw{filename_saw}, mac{filename_mac}")
         except Exception as e:
             self.status_label.config(text=f"保存エラー: {e}", fg="red")
             print(f"保存失敗: {e}")
@@ -218,6 +231,13 @@ class AudioDataCollector:
         if self.socket:
             self.socket.close()
             self.socket = None
+        
+        # mac streamを閉じる
+        if self.mac_stream:
+            if self.mac_stream.is_active():
+                self.mac_stream.stop_stream()
+            self.mac_stream.close()
+            self.mac_stream = None
         
         # スレッド終了待ち
         if self.receive_thread and self.receive_thread.is_alive():
@@ -247,7 +267,13 @@ class AudioDataCollector:
         self.root.destroy()
         print("終了")
 
+def visualize_audio_data(saw_data, mac_data):
+    pass
+
+
 if __name__ == "__main__":
     root = tk.Tk()
     app = AudioDataCollector(root)
     root.mainloop()
+
+    

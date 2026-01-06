@@ -7,3 +7,4 @@ data_48k/
 *.pkl
 *.pyc
 past_data_1/
+graph/
