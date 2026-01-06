@@ -10,14 +10,14 @@ from PyQt6.QtCore import QThread, pyqtSignal, QObject, QTimer
 import pyqtgraph as pg
 from collections import deque
 
-# --- Configuration ---
-UDP_IP = "0.0.0.0" # Listen on all network interfaces
-UDP_PORT = 8000    # Must match the port in your ESP32 code
+# Configuration
+UDP_IP = "0.0.0.0" 
+UDP_PORT = 8000    
 
 # Audio Settings
 SAMPLE_RATE = 24000
-BUFFER_SIZE = 1024  # Size of the UDP packet payload (bytes)
-DTYPE = np.int16   # Data type sent by ESP32 (16-bit PCM)
+BUFFER_SIZE = 1024  
+DTYPE = np.int16   
 SPECTRO_TIME_STEPS = 100
 
 # Spectrogram Settings

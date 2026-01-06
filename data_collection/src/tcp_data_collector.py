@@ -14,9 +14,9 @@ CHANNELS = 1              # モノラル
 SAMPLE_RATE = 24000       # サンプリングレート
 BUFFER_SIZE = 1024        # 一度に読み込むデータサイズ
 
-# --- UDP設定 ---
-ESP_IP = "saw-ring.local"  # ESP32のIPアドレス
-PORT = 8000         # ポート番号
+# TCP設定
+ESP_IP = "saw-ring.local"
+PORT = 8000 
 DTYPE = np.int16
 NUM_SAMPLES = BUFFER_SIZE // np.dtype(DTYPE).itemsize
 num_samples = BUFFER_SIZE // np.dtype(DTYPE).itemsize
