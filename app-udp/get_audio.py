@@ -7,6 +7,9 @@ import time
 from collections import deque
 import socket
 import re
+import numpy as np
+import matplotlib.pyplot as plt
+import wave
 
 from utils import *
 
@@ -268,12 +271,73 @@ class AudioDataCollector:
         print("終了")
 
 def visualize_audio_data(saw_data, mac_data):
-    pass
+
+    with wave.open(saw_data, 'rb') as wf:
+        saw_bytes = wf.readframes(wf.getnframes())
+    with wave.open(mac_data, 'rb') as wf:
+        mac_bytes = wf.readframes(wf.getnframes())
+
+    if len(saw_bytes) == 0 and len(mac_bytes) == 0:
+        print("visualize_audio_data: empty input")
+        return
+
+    # int16 PCM -> numpy配列
+    saw = np.frombuffer(saw_bytes, dtype=np.int16) if len(saw_bytes) else np.array([], dtype=np.int16)
+    mac = np.frombuffer(mac_bytes, dtype=np.int16) if len(mac_bytes) else np.array([], dtype=np.int16)
+
+    # 正規化（表示用）
+    def _norm(x: np.ndarray) -> np.ndarray:
+        if x.size == 0:
+            return x.astype(np.float32)
+        return (x.astype(np.float32) / 32768.0)
+
+    saw_f = _norm(saw)
+    mac_f = _norm(mac)
+
+    t_saw = np.arange(saw_f.size) / float(SAMPLE_RATE) if saw_f.size else np.array([], dtype=np.float32)
+    t_mac = np.arange(mac_f.size) / float(MAC_SAMPLE_RATE) if mac_f.size else np.array([], dtype=np.float32)
+
+    max_t = 0.0
+    if t_saw.size:
+        max_t = max(max_t, float(t_saw[-1]))
+    if t_mac.size:
+        max_t = max(max_t, float(t_mac[-1]))
+
+    fig, axes = plt.subplots(
+        2, 1, sharex=True, figsize=(7, 4), constrained_layout=True
+    )
+
+    # 上段: SAW (UDP)
+    ax0 = axes[0]
+    if saw_f.size:
+        ax0.plot(t_saw, saw_f, linewidth=0.8, color="#1f77b4")
+    ax0.set_title("VPU")
+    ax0.set_ylabel("Amplitude")
+    ax0.grid(True, alpha=0.25)
+
+    # 下段: Mac mic
+    ax1 = axes[1]
+    if mac_f.size:
+        ax1.plot(t_mac, mac_f, linewidth=0.8, color="#9467bd")
+    ax1.set_title("Microphone")
+    ax1.set_xlabel("Time (s)")
+    ax1.set_ylabel("Amplitude")
+    ax1.grid(True, alpha=0.25)
+
+    if max_t > 0:
+        ax1.set_xlim(0, max_t)
+
+    plt.show()
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = AudioDataCollector(root)
-    root.mainloop()
+    # root = tk.Tk()
+    # app = AudioDataCollector(root)
+    # root.mainloop()
+
+    saw_dir="../data_collection/data/audio/saw_4.wav"
+    mac_dir ="../data_collection/data/audio/mac_4.wav"
+
+    visualize_audio_data(saw_dir, mac_dir)
 
     
