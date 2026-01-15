@@ -1,0 +1,21 @@
+import numpy as np
+
+# UDP settings
+UDP_IP = "0.0.0.0"
+UDP_PORT = 8000
+SOCKET_BUF_SIZE = 65536
+
+# SAW settings
+SAMPLE_RATE = 24000
+BUFFER_SIZE = 1024       # 1回の受信パケットサイズ
+DTYPE = np.int16         # 受信データの型
+NORM_FACTOR = 32768.0    # 正規化係数
+
+# Visualize settings
+WAVE_WINDOW_SIZE = 48000
+N_FFT = 1024
+HOP_LENGTH = 256
+N_MELS = 80              # 縦軸の解像度
+SPECTRO_WIDTH = 200      # 横軸の時間ステップ数
+FFT_SIZE = 1024          # FFTのウィンドウサイズ
+MAX_FREQ_DISP = 8000     # 表示する最大周波数(Hz)
