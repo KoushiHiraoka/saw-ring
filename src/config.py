@@ -19,3 +19,9 @@ N_MELS = 80              # 縦軸の解像度
 SPECTRO_WIDTH = 200      # 横軸の時間ステップ数
 FFT_SIZE = 1024          # FFTのウィンドウサイズ
 MAX_FREQ_DISP = SAMPLE_RATE / 2     # 表示する最大周波数(Hz)
+
+# Inference settings
+MODEL_PATH = "./surface_recognition/model.pth" # pthファイルパス
+NUM_CLASSES = 8                                 # クラス数
+CLASS_LABELS = ["cardboard", "fabric", "glass", "paper", "plastic", "skin", "stainless", "wood"]   # クラス名
+INFERENCE_INTERVAL = 0.5

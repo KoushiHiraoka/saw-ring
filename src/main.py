@@ -3,10 +3,13 @@ import dearpygui.dearpygui as dpg
 import matplotlib.pyplot as plt
 import numpy as np
 import traceback
+import time
 
 from config import *
 from udp import UDPListener
 from signal_process import DSPProcessor
+from surface_recognition.inference import InferenceEngine
+
 
 waveform_data = np.zeros(WAVE_WINDOW_SIZE, dtype=np.float32)
 spectro_saw = np.zeros((N_MELS, SPECTRO_WIDTH), dtype=np.float32)
@@ -14,16 +17,22 @@ x_indices_wave_sec = np.arange(WAVE_WINDOW_SIZE) / SAMPLE_RATE
 
 colormap = plt.get_cmap('viridis')
 SCALE_FFT = 4.0
+last_inference_time = 0.0
 
 listener = UDPListener()
 dsp = DSPProcessor()
+inference_engine = InferenceEngine()
+
+
 
 def setup_gui():
     dpg.create_context()
     dpg.create_viewport(title='SAW-RING DATA VISUALIZATION', width=1200, height=800)
+
+    dpg.set_global_font_scale(1.7) # 全体のサイズ変更(フォント含む)
     
     with dpg.window(tag="Primary Window"):
-        # --- Header ---
+        # Header
         dpg.add_text("SAW DATA VISUALIZATION", color=(0, 255, 255))
         dpg.add_separator()
         
@@ -34,12 +43,25 @@ def setup_gui():
 
         dpg.add_spacer(height=10)
 
+        # Prediction Table
+        with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True,
+                       borders_innerV=True, borders_outerV=True):
+            dpg.add_table_column(label="Predicted Surface")
+            dpg.add_table_column(label="Confidence")
+            
+            with dpg.table_row():
+                dpg.add_text("---", tag="predicted_label", color=(255, 255, 0))
+                dpg.add_text("0.00%", tag="confidence_label", color=(255, 100, 0))
+        # ------------------------
+
+        dpg.add_spacer(height=10)
+
         with dpg.texture_registry(show=False):
-            # 初期値として真っ黒な画像データを作成 (R,G,B,A) * 画素数
+            # 初期値 (黒画像)
             dummy_data = np.zeros(SPECTRO_WIDTH * N_MELS * 4, dtype=np.float32)
             dpg.add_dynamic_texture(width=SPECTRO_WIDTH, height=N_MELS, default_value=dummy_data.tolist(), tag="spectro_saw")
 
-        # --- Layout Table ---
+        # Layout Table
         with dpg.table(header_row=True, borders_innerH=True, borders_outerH=True, 
                        borders_innerV=True, borders_outerV=True, resizable=True):
             
@@ -76,6 +98,7 @@ def setup_gui():
                                          [SPECTRO_WIDTH, max_freq], 
                                          parent="y_axis_spec",
                                          tag="spectro_series")
+            
 
                 
 
@@ -84,8 +107,9 @@ def setup_gui():
     dpg.set_primary_window("Primary Window", True)
 
 def update_loop():
-    global waveform_data, spectro_saw
+    global waveform_data, spectro_saw, last_inference_time
     
+
     try :
         new_data = listener.get_data()
         
@@ -127,6 +151,23 @@ def update_loop():
             filtered_mags = mags[mask] / SCALE_FFT
             
             dpg.set_value("fft_series", [freqs_khz, filtered_mags])
+
+            # 4. Inference
+            current_time = time.time()
+            if current_time - last_inference_time > INFERENCE_INTERVAL:
+                # 2秒分の波形データを使って推論
+                label, conf = inference_engine.predict(waveform_data)
+                
+                dpg.set_value("predicted_label", label)
+                dpg.set_value("confidence_label", f"{conf * 100:.1f}%")
+                
+                # 確信度に応じて色を変える
+                if conf > 0.8:
+                    dpg.configure_item("predicted_label", color=(0, 255, 0)) # 高信頼度: 緑
+                else:
+                    dpg.configure_item("predicted_label", color=(255, 255, 0)) # 低信頼度: 黄
+                
+                last_inference_time = current_time
                 
         else:
             if listener.running:
