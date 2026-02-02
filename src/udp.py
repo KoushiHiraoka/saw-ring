@@ -31,7 +31,7 @@ class UDPListener:
                 pcm_data = np.frombuffer(data, dtype=DTYPE)
                 if pcm_data.size > 0:
                     normalized = pcm_data.astype(np.float32) / NORM_FACTOR # 正規化
-                    normalized = normalized - np.mean(normalized)  # DCオフセット除去
+                    # normalized = normalized - np.mean(normalized)  # DCオフセット除去
                     self.data_queue.put(normalized)
 
             except Exception as e:
