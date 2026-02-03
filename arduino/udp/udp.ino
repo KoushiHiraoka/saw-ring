@@ -4,7 +4,10 @@
 
 // I2Sピンの設定
 #define I2S_PDM_CLK_IO      (GPIO_NUM_3)  // CLK
-#define I2S_PDM_DIN_IO      (GPIO_NUM_1)  // DATA
+// ver.1
+// #define I2S_PDM_DIN_IO      (GPIO_NUM_1)  // DATA
+// ver.2
+#define I2S_PDM_DIN_IO      (GPIO_NUM_2)  // DATA
 
 // I2S設定
 #define I2S_PORT            (I2S_NUM_0)   
@@ -13,9 +16,11 @@ constexpr int BITS_PER_SAMPLE = 16;
 constexpr size_t BUFFER_SIZE = 1024;
 
 // WiFi設定
-const char* ssid = "saw-ring";
-// const char* password = "password";
-constexpr int udpPort = 8000; 
+// saw-ring 1
+// const char* ssid = "saw-ring";
+// constexpr int udpPort = 8000; 
+const char* ssid = "saw-ring-2";
+constexpr int udpPort = 8800; 
 WiFiUDP udp;
 
 // 受信チャンネル

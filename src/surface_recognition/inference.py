@@ -4,6 +4,7 @@ from config import *
 class InferenceEngine:
     def __init__(self):
         self.device = torch.device("cpu")
+        self.model_loaded = True
 
         # モデルの構築
         self.model = ResNet18(num_classes=NUM_CLASSES)
@@ -12,6 +13,7 @@ class InferenceEngine:
         try:
             state_dict = torch.load(MODEL_PATH, map_location=self.device)
             self.model.load_state_dict(state_dict)
+            self.model_loaded = True
             print("Model loaded successfully.")
         except FileNotFoundError:
             print(f"Warning: Model file not found at {MODEL_PATH}. Prediction will be random.")
@@ -25,6 +27,10 @@ class InferenceEngine:
         """
         Numpyの音声データを受け取り、予測ラベルと確信度を返す
         """
+        if not self.model_loaded:
+            print("Model not loaded. Cannot perform prediction.")
+            return "Error", 0.0
+        
         # 前処理 (PCEN)
         feature = extract_pcen(audio_buffer)
         

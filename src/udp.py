@@ -24,15 +24,14 @@ class UDPListener:
     def _listen_loop(self):
         while self.running:
             try:
-                # 少し多めにバッファを取って読み出し
                 data, _ = self.sock.recvfrom(BUFFER_SIZE * 4)
                 if not data:
                     continue
 
-                # バイナリ変換と正規化
                 pcm_data = np.frombuffer(data, dtype=DTYPE)
                 if pcm_data.size > 0:
-                    normalized = pcm_data.astype(np.float32) / NORM_FACTOR
+                    normalized = pcm_data.astype(np.float32) / NORM_FACTOR # 正規化
+                    # normalized = normalized - np.mean(normalized)  # DCオフセット除去
                     self.data_queue.put(normalized)
 
             except Exception as e:
