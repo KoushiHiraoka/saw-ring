@@ -1,35 +1,53 @@
-# main.py
 import dearpygui.dearpygui as dpg
 import matplotlib.pyplot as plt
 import numpy as np
 import traceback
 import time
+from collections import deque
 
 from config import *
 from udp import UDPListener
 from signal_process import DSPProcessor
-from surface_recognition.inference import InferenceEngine
-
+from surface_recognition.inference import InferenceEngine  
 
 waveform_data = np.zeros(WAVE_WINDOW_SIZE, dtype=np.float32)
 spectro_saw = np.zeros((N_MELS, SPECTRO_WIDTH), dtype=np.float32)
 x_indices_wave_sec = np.arange(WAVE_WINDOW_SIZE) / SAMPLE_RATE
 
 colormap = plt.get_cmap('viridis')
-SCALE_FFT = 4.0
 last_inference_time = 0.0
+SCALE_FFT = 4.0
+
+TH_HIGH = 0.6 # イベント開始
+TH_LOW = 0.5 # イベント終了
+N_TRIGGER_FRAMES = 2
 
 listener = UDPListener()
 dsp = DSPProcessor()
 inference_engine = InferenceEngine()
+class EventState:
+    IDLE = "IDLE"
+    TRIGGERED = "TRIGGERED"
 
-
+current_state = EventState.IDLE
+trigger_counter = 0
+miss_counter = 0
+last_triggered_label = None
+prediction_history = deque(maxlen=10)
+display_label = "---"  # GUI表示用のラベル
+display_confidence = 0.0  # GUI表示用の確信度  
 
 def setup_gui():
     dpg.create_context()
+
+    with dpg.font_registry():
+        font = dpg.add_font("/System/Library/Fonts/ヒラギノ角ゴシック W3.ttc", 20)
+        dpg.add_font_range_hint(dpg.mvFontRangeHint_Japanese, parent=font)
+
     dpg.create_viewport(title='SAW-RING DATA VISUALIZATION', width=1200, height=800)
 
-    dpg.set_global_font_scale(1.7) # 全体のサイズ変更(フォント含む)
+    dpg.set_global_font_scale(1) # 全体のサイズ変更(フォント含む)
+    dpg.bind_font(font) 
     
     with dpg.window(tag="Primary Window"):
         # Header
@@ -39,7 +57,7 @@ def setup_gui():
         with dpg.group(horizontal=True):
             dpg.add_button(label="Start", callback=listener.start, width=100)
             dpg.add_button(label="Stop", callback=listener.stop, width=100)
-            dpg.add_text("UDP Status: Idle", tag="status_text")
+            # dpg.add_text("UDP Status: Idle", tag="status_text")
 
         dpg.add_spacer(height=10)
 
@@ -106,16 +124,67 @@ def setup_gui():
     dpg.show_viewport()
     dpg.set_primary_window("Primary Window", True)
 
+def check_event_trigger(label, confidence):
+    """状態遷移ロジック: イベントの開始・終了を判定"""
+    global current_state, trigger_counter, miss_counter, last_triggered_label, display_label, display_confidence
+    
+    event_started = False
+    event_ended = False
+    
+    if current_state == EventState.IDLE:
+        # IDLE状態: 高確信度が連続したらTRIGGERED
+        if confidence >= TH_HIGH and label != "None":
+            if last_triggered_label == label:
+                trigger_counter += 1
+            else:
+                trigger_counter = 1
+                last_triggered_label = label
+            
+            if trigger_counter >= N_TRIGGER_FRAMES:
+                current_state = EventState.TRIGGERED
+                event_started = True
+                display_label = label  # 表示ラベルを固定
+                display_confidence = confidence
+                print(f"[EVENT START] {label} (conf: {confidence:.2f})")
+        else:
+            trigger_counter = 0
+            last_triggered_label = None
+            # IDLE状態では常に更新
+            display_label = label
+            display_confidence = confidence
+            
+    elif current_state == EventState.TRIGGERED:
+        # TRIGGERED状態: 確信度が低下したらIDLEに戻る
+        if confidence < TH_LOW or label != last_triggered_label:
+            miss_counter += 1
+        else:
+            miss_counter = 0
+
+        if miss_counter >= N_TRIGGER_FRAMES:
+            current_state = EventState.IDLE
+            event_ended = True
+            print(f"[EVENT END] {last_triggered_label}")
+            trigger_counter = 0
+            miss_counter = 0
+            last_triggered_label = None
+            # イベント終了時に現在の予測で更新
+            display_label = label
+            display_confidence = confidence
+        # TRIGGERED中は display_label を更新しない（固定表示）
+    
+    return event_started, event_ended
+
+
 def update_loop():
-    global waveform_data, spectro_saw, last_inference_time
+    global waveform_data, spectro_saw, last_inference_time, current_state
     
 
     try :
         new_data = listener.get_data()
         
+
         if new_data is not None:
-            dpg.set_value("status_text", "UDP Status: Receiving...")
-        
+            # dpg.set_value("status_text", "UDP Status: Receiving...")
             # 1. Update Waveform
             chunk_len = len(new_data)
             if chunk_len > 0:
@@ -131,7 +200,6 @@ def update_loop():
                     mel_cols = mel_cols[:, -SPECTRO_WIDTH:]
                     num_new = SPECTRO_WIDTH
 
-                # データシフト
                 spectro_saw = np.roll(spectro_saw, -num_new, axis=1)
                 spectro_saw[:, -num_new:] = mel_cols
                 flipped_saw = spectro_saw[::-1, :]
@@ -155,23 +223,27 @@ def update_loop():
             # 4. Inference
             current_time = time.time()
             if current_time - last_inference_time > INFERENCE_INTERVAL:
-                # 2秒分の波形データを使って推論
                 label, conf = inference_engine.predict(waveform_data)
+                prediction_history.append((label, conf))
+                check_event_trigger(label, conf)
                 
-                dpg.set_value("predicted_label", label)
-                dpg.set_value("confidence_label", f"{conf * 100:.1f}%")
+                if display_label == "None":
+                    dpg.set_value("predicted_label", "別の場所に触れています")
+                else:
+                    dpg.set_value("predicted_label", display_label)
+                dpg.set_value("confidence_label", f"{display_confidence * 100:.1f}%")
                 
                 # 確信度に応じて色を変える
-                if conf > 0.8:
+                if display_confidence > 0.8:
                     dpg.configure_item("predicted_label", color=(0, 255, 0)) # 高信頼度: 緑
                 else:
                     dpg.configure_item("predicted_label", color=(255, 255, 0)) # 低信頼度: 黄
                 
                 last_inference_time = current_time
                 
-        else:
-            if listener.running:
-                dpg.set_value("status_text", "UDP Status: Waiting for data...")
+        # else:
+        #     if listener.running:
+        #         dpg.set_value("status_text", "UDP Status: Waiting for data...")
     except Exception as e:
         err_msg = f"Update Error: {str(e)}"
         print(err_msg)

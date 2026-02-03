@@ -7,6 +7,7 @@ import numpy as np
 def extract_pcen(audio, sr=24000, n_mels=128, n_fft=1024, hop_length=256, fixed_width=188):
     # fixed width: 出力するスペクトログラムの時間軸の長さ (基本188(2s))
     y = audio
+    y = y - np.mean(y)  # DCオフセット除去
 
     if len(y) < n_fft:
         y = librosa.util.fix_length(y, size=n_fft)

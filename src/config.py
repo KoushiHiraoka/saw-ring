@@ -21,7 +21,8 @@ FFT_SIZE = 1024          # FFTのウィンドウサイズ
 MAX_FREQ_DISP = SAMPLE_RATE / 2     # 表示する最大周波数(Hz)
 
 # Inference settings
-MODEL_PATH = "./surface_recognition/model.pth" # pthファイルパス
-NUM_CLASSES = 8                                 # クラス数
-CLASS_LABELS = ["cardboard", "fabric", "glass", "paper", "plastic", "skin", "stainless", "wood"]   # クラス名
+MODEL_PATH = "./surface_recognition/resnet_best_model.pth" # pthファイルパス
+NUM_CLASSES = 9                                 # クラス数
+# CLASS_LABELS = ["ダンボール", "布", "ガラス", "None", "紙", "プラスチック", "皮膚", "ステンレス", "木"]  # クラス名
+CLASS_LABELS = ["None", "None", "None", "None", "None", "None", "皮膚を触っています！", "None", "None"]
 INFERENCE_INTERVAL = 0.5
