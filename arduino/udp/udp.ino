@@ -15,12 +15,12 @@ constexpr int SAMPLE_RATE = 24000;
 constexpr int BITS_PER_SAMPLE = 16;         
 constexpr size_t BUFFER_SIZE = 1024;
 
-// WiFi設定
+// WiFi設定 (loop内でも変更あり)
 // saw-ring 1
-// const char* ssid = "saw-ring";
-// constexpr int udpPort = 8000; 
-const char* ssid = "saw-ring-2";
-constexpr int udpPort = 8800; 
+const char* ssid = "saw-ring-3";
+constexpr int udpPort = 8880; 
+// const char* ssid = "saw-ring-2";
+// constexpr int udpPort = 8800; 
 WiFiUDP udp;
 
 // 受信チャンネル
@@ -91,6 +91,10 @@ void loop() {
     // UDPでPCMデータを送信
     // IPAddress broadcastAddress = WiFi.softAPIP();
     // broadcastAddress[3] = 255;
+
+    // saw-ring 1
+    // IPAddress pcIP(192, 168, 4, 2);
+    // saw-ring 2
     IPAddress pcIP(192, 168, 4, 2);
 
     if (udp.beginPacket(pcIP, udpPort)) {
