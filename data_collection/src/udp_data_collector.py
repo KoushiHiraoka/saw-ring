@@ -14,7 +14,9 @@ SAMPLE_RATE = 24000
 BUFFER_SIZE = 1024        
 # UDP config
 UDP_IP = "0.0.0.0"  
-PORT = 8000         
+PORT = 8880
+# saw-ring-2
+# PORT = 8800       
 
 class AudioDataCollector:
     def __init__(self, root):
