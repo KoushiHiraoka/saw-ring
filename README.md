@@ -1,6 +1,6 @@
 # SAW-Ring
 
-SAW（Surface Acoustic Wave）センサを搭載したリング型デバイスから音響データをリアルタイム受信し、信号可視化・表面認識推論を行うシステムです。
+VPU (Voice Pick Up) センサを搭載したリング型デバイスからSAW（Surface Acoustic Wave）データをリアルタイム受信し、信号可視化・表面認識推論を行うシステムです。
 
 ## 機能
 
@@ -73,16 +73,18 @@ python udp_data_collector.py
 
 保存先: `data/experiment/<texture>/<person>/<gesture>_<index>.wav`
 
-パケットロス率が 10% を超えた場合は保存が中止されます。
+パケットロス率が **10%** を超えた場合は保存が中止されます。
 
 ### Arduino スケッチの書き込み
 
-Arduino IDE (2.3.6 確認済み) で [arduino/udp/udp.ino](arduino/udp/udp.ino) を開き、ESP32 に書き込みます。
+スケッチ内で、ESP32S3シリーズのI2S/PDMライブラリを利用するため、
+以下より、i2s_pdm.hファイルをダウンロードして、Arduinoライブラリとして利用できるディレクトリに配置します。
+https://github.com/espressif/esp-idf/blob/master/components/esp_driver_i2s/include/driver/i2s_pdm.h
 
-
+Arduino IDE (2.3.6 確認済) で [arduino/udp/udp.ino](arduino/udp/udp.ino) を開き、ESP32 に書き込みます。
 
 書き込み前に、接続先 PC の IP アドレスを確認して設定してください。
-ESP32 はアクセスポイントモードで動作するため、接続した PC には `192.168.4.2` が割り当てられます。
+ESP32 はアクセスポイントモード (192.168.4.1) で動作するため、接続した PC には `192.168.4.2` が割り当てられます。
 
 ```cpp
 // arduino/udp/udp.ino
@@ -102,7 +104,7 @@ IPAddress pcIP(192, 168, 4, 2);  // 接続先PCのIPアドレス
 
 ```text
 .
-├── src/                        # 可視化・推論メインコード
+├── src/                        # 実行コード
 │   ├── main.py                 # エントリポイント（GUIアプリ）
 │   ├── config.py               # 各種パラメータ設定
 │   ├── udp.py                  # UDP 受信
