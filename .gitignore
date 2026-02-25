@@ -1,4 +1,9 @@
 .DS_Store
+__pycache__/ 
+.pytest_cache/
+*.wav
+*.log
+.env
 /test/
 .venv/
 data/
