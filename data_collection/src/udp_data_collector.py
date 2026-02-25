@@ -13,10 +13,13 @@ CHANNELS = 1
 SAMPLE_RATE = 24000       
 BUFFER_SIZE = 1024        
 # UDP config
-UDP_IP = "0.0.0.0"  
+# デバイスごとのポート番号 (arduino/udp/udp.ino の udpPort と合わせる):
+#   saw-ring-1: 8000
+#   saw-ring-2: 8800
+#   saw-ring-3: 8880
+#   saw-ring-4: 8888
+UDP_IP = "0.0.0.0"
 PORT = 8880
-# saw-ring-2
-# PORT = 8800       
 
 class AudioDataCollector:
     def __init__(self, root):

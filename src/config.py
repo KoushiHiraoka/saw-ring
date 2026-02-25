@@ -1,8 +1,13 @@
 import numpy as np
 
 # UDP settings
+# デバイスごとのポート番号 (arduino/udp/udp.ino の udpPort と合わせる):
+#   saw-ring-1: 8000
+#   saw-ring-2: 8800
+#   saw-ring-3: 8880
+#   saw-ring-4: 8888
 UDP_IP = "0.0.0.0"
-UDP_PORT = 8000
+UDP_PORT = 8888
 SOCKET_BUF_SIZE = 65536
 
 # SAW settings

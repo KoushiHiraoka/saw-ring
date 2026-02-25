@@ -3,11 +3,12 @@
 #include "driver/i2s_pdm.h"
 
 // I2Sピンの設定
-#define I2S_PDM_CLK_IO      (GPIO_NUM_3)  // CLK
-// ver.1
+// ver.1 (saw-ring-1, 2)
 // #define I2S_PDM_DIN_IO      (GPIO_NUM_1)  // DATA
-// ver.2
+// #define I2S_PDM_CLK_IO      (GPIO_NUM_3)  // CLK
+// ver.2 (saw-ring-3 以降)
 #define I2S_PDM_DIN_IO      (GPIO_NUM_2)  // DATA
+#define I2S_PDM_CLK_IO      (GPIO_NUM_3)  // CLK
 
 // I2S設定
 #define I2S_PORT            (I2S_NUM_0)   
@@ -16,11 +17,16 @@ constexpr int BITS_PER_SAMPLE = 16;
 constexpr size_t BUFFER_SIZE = 1024;
 
 // WiFi設定 (loop内でも変更あり)
-// saw-ring 1
-const char* ssid = "saw-ring-3";
-constexpr int udpPort = 8880; 
+// const char* ssid = "saw-ring";
+// constexpr int udpPort = 8000; 
 // const char* ssid = "saw-ring-2";
 // constexpr int udpPort = 8800; 
+// const char* ssid = "saw-ring-3";
+// constexpr int udpPort = 8880; 
+const char* ssid = "saw-ring-4";
+constexpr int udpPort = 8888;
+
+IPAddress pcIP(192, 168, 4, 2);
 WiFiUDP udp;
 
 // 受信チャンネル
@@ -91,11 +97,6 @@ void loop() {
     // UDPでPCMデータを送信
     // IPAddress broadcastAddress = WiFi.softAPIP();
     // broadcastAddress[3] = 255;
-
-    // saw-ring 1
-    // IPAddress pcIP(192, 168, 4, 2);
-    // saw-ring 2
-    IPAddress pcIP(192, 168, 4, 2);
 
     if (udp.beginPacket(pcIP, udpPort)) {
       udp.write((uint8_t*)i2s_read_buff, bytes_read);
